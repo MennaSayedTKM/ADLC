@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type JSX } from 'react'
 import { api } from '../api/client'
 import type { AcceptanceCriterion, ErrorHandlingEntry, ItemFields, RequirementItem, Scenario } from '../api/types'
 import { ProvenanceBadge } from './ProvenanceBadge'

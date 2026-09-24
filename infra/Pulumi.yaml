@@ -1,0 +1,7 @@
+name: adlc
+description: ADLC (TKMiND SDLC platform) on AWS — app server, GPU embedding server, ALB + Cognito login.
+runtime:
+  name: python
+  options:
+    toolchain: pip
+    virtualenv: venv

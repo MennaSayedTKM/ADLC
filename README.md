@@ -108,6 +108,14 @@ Colab with a GPU runtime, add your ngrok auth token, run all cells, and put
 the printed ngrok URL in `.env` as `EMBED_API_URL`. The URL changes every
 time the notebook restarts.
 
+In AWS the same model runs as a service (`embed_server/server.py`) on a GPU
+instance. See [infra/README.md](infra/README.md).
+
+## Deployment
+
+ADLC is deployed to AWS with Pulumi. [infra/README.md](infra/README.md) has
+the architecture and step-by-step instructions.
+
 ## Running locally
 
 Start the backend and frontend in two terminals:

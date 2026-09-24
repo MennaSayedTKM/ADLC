@@ -83,7 +83,7 @@ export function AddItemForm({
         parent_id: parentId,
         previous_draft: regenerate && lastDraft ? lastDraft : undefined,
       })
-      if (kind === 'epic' && 'title' in draft) {
+      if (kind === 'epic' && 'assumptions' in draft) {
         setLastDraft(draft)
         setDraftFields({ assumptions: draft.assumptions, dependencies: draft.dependencies })
         setText(draft.title)

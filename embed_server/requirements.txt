@@ -1,0 +1,11 @@
+# Embedding server (server.py) — runs on the AWS GPU instance.
+# Same packages the Colab notebook installs, minus pyngrok. Qwen3-VL needs
+# transformers >= 4.57.
+torch
+transformers>=4.57
+accelerate
+einops
+qwen-vl-utils
+Pillow
+fastapi
+uvicorn[standard]

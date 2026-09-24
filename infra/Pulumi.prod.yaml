@@ -1,0 +1,18 @@
+# Non-secret settings for the "prod" stack. Secrets (adlc:openaiApiKey, …)
+# are added with `pulumi config set --secret …` and stored here encrypted
+# with the stack's KMS key — see infra/README.md. Every adlc:* value below
+# is optional; the defaults live in adlc_stack.py.
+config:
+  aws:region: eu-central-1
+  aws:profile: adlc
+  adlc:githubRepo: MennaSayedTKM/ADLC
+  adlc:gitBranch: main
+  adlc:appInstanceType: t3.large
+  adlc:dataVolumeGb: "50"
+  adlc:embedEnabled: "true"
+  adlc:embedInstanceType: g4dn.xlarge
+  # Embedding GPU runs Mon–Fri 08:00–19:00 Dubai time and is stopped otherwise.
+  adlc:embedScheduleEnabled: "true"
+  adlc:embedStartCron: cron(0 8 ? * MON-FRI *)
+  adlc:embedStopCron: cron(0 19 ? * MON-FRI *)
+  adlc:scheduleTimezone: Asia/Dubai

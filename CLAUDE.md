@@ -15,7 +15,10 @@ build brief (historical — some details changed during the build).
 - `ai/vision/` — GPT-4o vision: design alignment checker, intake image transcription,
   rerank/answer synthesis (kept for future Q&A)
 - `ai/embed_client.py` — `EmbedClient` for the embedding server (retry + `EmbedServerError`)
-- `embed_server/` — Colab notebook for the Qwen3-VL embedding server (exposed via ngrok)
+- `embed_server/` — Qwen3-VL embedding server: `server.py` (runs on the AWS GPU instance) and
+  the original Colab notebook. Keep their model, prompts and pooling identical.
+- `infra/` — Pulumi (Python) deployment to AWS: one Control Tower member account, eu-central-1.
+  See `infra/README.md`. Infra tests run offline: `cd infra; venv\Scripts\python -m pytest tests`
 - `frontend/src/` — React + Vite + TypeScript; `api/client.ts` calls `/api/*`
 - `config.yaml` + `config.py` — every tunable value; `.env` — secrets
 
