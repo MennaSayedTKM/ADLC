@@ -226,15 +226,32 @@ def _requirement_html(req: BusinessRequirement) -> str:
     return title + (f"<table><tbody>{body}</tbody></table>" if body else "")
 
 
+def _unused_title(client: ConfluenceClient, title: str) -> str:
+    """`title`, or `title (2)`, `title (3)`, … if taken. A published version
+    page is never overwritten, so a same-titled page (e.g. the same version
+    published from another TKMiND environment) is left alone and the new
+    page gets a numbered title instead."""
+    candidate, n = title, 1
+    while client.find_page_by_title(candidate) is not None:
+        n += 1
+        candidate = f"{title} ({n})"
+    return candidate
+
+
 def ensure_index_page(session, client: ConfluenceClient, project: Project) -> dict:
-    """Creates the project's Confluence index page once and caches its
-    id/url on Project.confluence_metadata; every later publish reuses it
-    rather than re-creating or re-searching for it."""
+    """Finds or creates the project's Confluence index page once and caches
+    its id/url on Project.confluence_metadata; every later publish reuses
+    the cached page rather than looking it up again. An index page with the
+    same title may already exist — e.g. the project was published from
+    another TKMiND environment — and is adopted rather than duplicated
+    (Confluence rejects duplicate titles): it's only a container listing
+    its child version pages, so sharing it is harmless."""
     meta = project.confluence_metadata or {}
     if meta.get("index_page_id"):
         return meta
 
-    page = client.create_page(index_page_title(project), build_index_page_html(project))
+    title = index_page_title(project)
+    page = client.find_page_by_title(title) or client.create_page(title, build_index_page_html(project))
     meta = {"index_page_id": page["id"], "index_page_url": client.page_url(page)}
     project.confluence_metadata = meta
     session.flush()
@@ -262,7 +279,9 @@ def publish_requirements_version(
             supersedes_url = previous_meta["page_url"]
 
     body_html = build_version_page_html(bdoc, supersedes_url=supersedes_url)
-    page = client.create_page(version_page_title(bdoc), body_html, parent_id=index_meta["index_page_id"])
+    page = client.create_page(
+        _unused_title(client, version_page_title(bdoc)), body_html, parent_id=index_meta["index_page_id"]
+    )
     page_url = client.page_url(page)
 
     if previous_page_id:

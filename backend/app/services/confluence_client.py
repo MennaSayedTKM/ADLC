@@ -48,6 +48,16 @@ class ConfluenceClient:
             "GET", f"/content/{page_id}", params={"expand": "body.storage,version"}
         )
 
+    def find_page_by_title(self, title: str) -> Optional[dict[str, Any]]:
+        """The page in this space with exactly this title, or None — Confluence
+        titles are unique per space, so creating a duplicate fails with 400."""
+        results = self._request(
+            "GET",
+            "/content",
+            params={"spaceKey": self.space_key, "title": title, "type": "page", "expand": "version"},
+        ).get("results", [])
+        return results[0] if results else None
+
     def create_page(self, title: str, body_html: str, parent_id: Optional[str] = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "type": "page",

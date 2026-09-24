@@ -1035,7 +1035,12 @@ class FakeConfluenceClient:
         self.pages: dict[str, dict] = {}
         self._next_id = 1000
 
+    def find_page_by_title(self, title):
+        return next((p for p in self.pages.values() if p["title"] == title), None)
+
     def create_page(self, title, body_html, parent_id=None):
+        if self.find_page_by_title(title) is not None:  # real Confluence rejects duplicate titles per space
+            raise ConfluenceError(400, "A page with this title already exists")
         page_id = str(self._next_id)
         self._next_id += 1
         page = {
@@ -1180,6 +1185,50 @@ def test_publish_confluence_links_new_version_to_superseded_one(client, sample_r
         assert "supersedes" in fake.pages[v2_page_id]["body"]["storage"]["value"].lower()
         # both version pages share the same index page parent
         assert fake.pages[v1_page_id]["parent_id"] == fake.pages[v2_page_id]["parent_id"]
+
+    finally:
+        _cleanup(project_id, created_document_ids)
+
+
+def test_publish_confluence_reuses_pages_published_from_another_environment(client, sample_requirements_pdf):
+    """The same project was already published from another TKMiND instance
+    (e.g. a laptop before the AWS deployment): its index page is adopted,
+    and the old version page is left untouched while the new one gets a
+    numbered title — Confluence rejects duplicate titles in a space."""
+    from datetime import datetime, timezone
+
+    from app.services.business_document import format_date
+
+    name = "pytest-confluence-existing-project"
+    project_id = None
+    created_document_ids = []
+    try:
+        r = client.post("/projects", json={"name": name})
+        project_id = r.json()["id"]
+        with open(sample_requirements_pdf, "rb") as f:
+            r = client.post(
+                f"/projects/{project_id}/requirements",
+                files={"file": ("requirements.pdf", f, "application/pdf")},
+            )
+        doc_id = r.json()["document"]["id"]
+        created_document_ids.append(doc_id)
+        r = client.post(f"/projects/{project_id}/requirements/{doc_id}/approve")
+        assert r.status_code == 200, r.text
+
+        fake = FakeConfluenceClient()
+        old_index = fake.create_page(f"{name} — Requirements", "<p>old index</p>")
+        version_title = f"{name} — Business Requirements v1 (Approved {format_date(datetime.now(timezone.utc))})"
+        old_version = fake.create_page(version_title, "<p>old version</p>", parent_id=old_index["id"])
+        app.dependency_overrides[get_confluence_client] = lambda: fake
+
+        r = client.post(f"/projects/{project_id}/requirements/{doc_id}/publish-confluence")
+        assert r.status_code == 200, r.text
+
+        new_page = fake.pages[r.json()["page_id"]]
+        assert new_page["parent_id"] == old_index["id"]  # existing index page adopted, not duplicated
+        assert new_page["title"] == f"{version_title} (2)"
+        assert fake.pages[old_version["id"]]["body"]["storage"]["value"] == "<p>old version</p>"
+        assert len(fake.pages) == 3
 
     finally:
         _cleanup(project_id, created_document_ids)
