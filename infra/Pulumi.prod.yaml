@@ -9,10 +9,14 @@ config:
   adlc:gitBranch: main
   adlc:appInstanceType: t3.large
   adlc:dataVolumeGb: "50"
-  adlc:embedEnabled: "true"
+  adlc:embedEnabled: "false"
   adlc:embedInstanceType: g4dn.xlarge
   # Embedding GPU runs Mon–Fri 08:00–19:00 Dubai time and is stopped otherwise.
   adlc:embedScheduleEnabled: "true"
   adlc:embedStartCron: cron(0 8 ? * MON-FRI *)
   adlc:embedStopCron: cron(0 19 ? * MON-FRI *)
   adlc:scheduleTimezone: Asia/Dubai
+  adlc:openaiApiKey:
+    secure: v1:td3aIVhd75WDGOV1:QiW3TUr5Dd8ndhtft4eyaA5HK9t8fjlQLnedkdfko/Cfx+OwlcXnlOOkS5Gh2ecvm8qmol9IqwI0sW3wgdZGnugBHC6ET4claUcQOErJwor2eJMJmGRFW0ox78oWuonCBLPy47cOfn1WhVPEJr/n419B70UHix1hq+REPHappVbgjpz0N4Sk2eTo4f+uW2ZtBjydRxRR4DBkYKk/vSDXCisBhQp778yTcKWnBb7tzE2EOiKcHgQn
+secretsprovider: awskms://alias/adlc-pulumi?region=eu-central-1&awssdk=v2&profile=adlc
+encryptedkey: AQICAHgQ95duvPtP+2bmxAmGES4Nb3ToM3vvlSgZi4T8w4zWsAEalpSGGP0JgZ8FA/XBqzlLAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMsPPtJRlq0kXP9GfbAgEQgDv1h4YeOTJogP25zdGBSXRMnW0nQRTX67w4f2M2fJ7tQ9jz6Wxk0hHdTAfJmAM/HjRj8Ud+2Bn3RdK9wA==
