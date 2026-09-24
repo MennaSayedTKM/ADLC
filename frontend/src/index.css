@@ -1,0 +1,176 @@
+/* ---------------------------------------------------------------------
+   Design tokens
+   ------------------------------------------------------------------- */
+:root {
+  color-scheme: light dark;
+
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-border: #e4e7ec;
+  --color-border-strong: #d0d5dd;
+
+  --color-text: #1a1d23;
+  --color-text-secondary: #565e6b;
+  --color-text-tertiary: #8a92a0;
+  --color-text-on-accent: #ffffff;
+
+  --color-accent: #4f46e5;
+  --color-accent-hover: #4338ca;
+  --color-accent-soft: #eef0fe;
+  --color-accent-soft-border: #d6d9fb;
+
+  --color-success: #15803d;
+  --color-success-soft: #ecfdf3;
+  --color-success-soft-border: #b7ecc6;
+
+  --color-warning: #b45309;
+  --color-warning-soft: #fef7ec;
+  --color-warning-soft-border: #fbe3b6;
+
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fef2f2;
+  --color-danger-soft-border: #f7c9c9;
+
+  --color-neutral-soft: #f0f1f4;
+  --color-neutral-soft-border: #dfe1e6;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 4px 20px rgba(16, 24, 40, 0.08);
+  --shadow-lg: 0 12px 40px rgba(16, 24, 40, 0.12);
+
+  --transition-fast: 120ms ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #14161b;
+    --color-surface: #1b1e25;
+    --color-surface-raised: #21242c;
+    --color-border: #2b2f38;
+    --color-border-strong: #3a3f4a;
+
+    --color-text: #e8eaef;
+    --color-text-secondary: #a3aab8;
+    --color-text-tertiary: #767d8a;
+
+    --color-accent: #8b85f5;
+    --color-accent-hover: #a5a0f8;
+    --color-accent-soft: #262a45;
+    --color-accent-soft-border: #363b5e;
+
+    --color-success: #4ade80;
+    --color-success-soft: #142a1d;
+    --color-success-soft-border: #1f4a2c;
+
+    --color-warning: #fbbf24;
+    --color-warning-soft: #2e2413;
+    --color-warning-soft-border: #4a3a1a;
+
+    --color-danger: #f87171;
+    --color-danger-soft: #2e1717;
+    --color-danger-soft-border: #4a2222;
+
+    --color-neutral-soft: #262932;
+    --color-neutral-soft-border: #333844;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.45);
+  }
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------
+   Reset + base
+   ------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+}
+
+p {
+  margin: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: var(--color-accent);
+}
+
+::selection {
+  background: var(--color-accent-soft-border);
+}
+
+/* Wide content (tables, code) should scroll inside itself, not the page */
+.scroll-x {
+  overflow-x: auto;
+}

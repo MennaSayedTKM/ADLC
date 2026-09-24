@@ -1,0 +1,45 @@
+.requirements-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-6);
+}
+
+.requirements-page__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 40vh;
+  color: var(--color-text-tertiary);
+  font-size: 0.875rem;
+}
+
+.requirements-page__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.requirements-page__main {
+  min-width: 0;
+}
+
+.requirements-page__sidebar {
+  position: sticky;
+  top: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+@media (max-width: 860px) {
+  .requirements-page__layout {
+    grid-template-columns: 1fr;
+  }
+  .requirements-page__sidebar {
+    position: static;
+  }
+}

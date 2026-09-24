@@ -1,0 +1,25 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--color-bg);
+}
+
+.app__main {
+  flex: 1;
+}
+
+.app__banner {
+  max-width: 1200px;
+  margin: var(--space-6) auto 0;
+  padding: 0 var(--space-6);
+}
+
+.app__empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 40vh;
+  color: var(--color-text-tertiary);
+  font-size: 0.9375rem;
+}

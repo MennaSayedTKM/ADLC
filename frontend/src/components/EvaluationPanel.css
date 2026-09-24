@@ -1,0 +1,264 @@
+.evaluation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.evaluation-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.evaluation-panel__title {
+  font-size: 0.9375rem;
+}
+
+.evaluation-panel__empty {
+  color: var(--color-text-tertiary);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+.evaluation-panel__error {
+  color: var(--color-danger);
+  font-size: 0.8125rem;
+}
+
+.evaluation-panel__scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+@media (max-width: 640px) {
+  .evaluation-panel__scores {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Headline score card + ring --- */
+
+.score-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.score-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.score-card__label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.score-card__hint {
+  font-size: 0.6875rem;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.score-card__summary {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+  margin: 0.3rem 0 0;
+}
+
+.score-ring {
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.score-ring__track {
+  stroke: var(--color-border);
+}
+
+.score-ring__value {
+  transition: stroke-dashoffset 0.6s ease;
+}
+
+.score-ring--success .score-ring__value {
+  stroke: var(--color-success);
+}
+
+.score-ring--warning .score-ring__value {
+  stroke: var(--color-warning);
+}
+
+.score-ring--danger .score-ring__value {
+  stroke: var(--color-danger);
+}
+
+.score-ring__text {
+  font-size: 1.125rem;
+  font-weight: 700;
+  fill: var(--color-text);
+}
+
+/* --- Sections --- */
+
+.evaluation-panel__section-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 var(--space-2);
+}
+
+/* --- Key findings: one section per category, each with its own score bar --- */
+
+.category-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.category-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.category-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.category-section__name {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.category-section__empty {
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  margin: 0;
+}
+
+.score-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 140px;
+  max-width: 260px;
+}
+
+.score-bar__track {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.score-bar__fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width 0.6s ease;
+}
+
+.score-bar__fill--success {
+  background: var(--color-success);
+}
+
+.score-bar__fill--warning {
+  background: var(--color-warning);
+}
+
+.score-bar__fill--danger {
+  background: var(--color-danger);
+}
+
+.score-bar__value {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+/* Finding cards slide horizontally within their category, one strip per
+   category — scroll-snap makes it feel like a deliberate carousel rather
+   than an ordinary overflow scrollbar. */
+.finding-carousel {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
+  scroll-snap-type: x proximity;
+}
+
+.finding-card {
+  flex: 0 0 240px;
+  scroll-snap-align: start;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-top: 3px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.finding-card--success {
+  border-top-color: var(--color-success);
+}
+
+.finding-card--warning {
+  border-top-color: var(--color-warning);
+}
+
+.finding-card--danger {
+  border-top-color: var(--color-danger);
+}
+
+.finding-card__text {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* --- Recommendations: cards, same visual language, no score --- */
+
+.evaluation-panel__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-2);
+}
+
+.recommendation-card {
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-soft-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.8125rem;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.evaluation-panel__meta {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}

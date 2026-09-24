@@ -1,0 +1,102 @@
+.screen-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.screen-detail__back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  padding: var(--space-1) 0;
+}
+
+.screen-detail__back:hover {
+  color: var(--color-accent);
+}
+
+.screen-detail__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.screen-detail__image-wrap {
+  position: relative;
+  background: var(--color-neutral-soft);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.screen-detail__image {
+  width: 100%;
+  display: block;
+}
+
+.screen-detail__highlight {
+  position: absolute;
+  border: 3px solid var(--color-accent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  animation: screen-detail-highlight-in 180ms ease-out;
+}
+
+@keyframes screen-detail-highlight-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.screen-detail__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  position: sticky;
+  top: var(--space-6);
+}
+
+.screen-detail__panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.screen-detail__title {
+  font-size: 1.0625rem;
+}
+
+.screen-detail__empty {
+  padding: var(--space-4);
+  background: var(--color-success-soft);
+  border: 1px solid var(--color-success-soft-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: 0.8438rem;
+}
+
+.screen-detail__findings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+@media (max-width: 860px) {
+  .screen-detail__layout {
+    grid-template-columns: 1fr;
+  }
+  .screen-detail__panel {
+    position: static;
+  }
+}

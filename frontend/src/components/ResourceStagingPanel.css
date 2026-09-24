@@ -1,0 +1,129 @@
+.resource-staging-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+
+.resource-staging-panel__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.resource-staging-panel__title {
+  font-size: 0.9375rem;
+}
+
+.resource-staging-panel__count {
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+  font-weight: 600;
+}
+
+.resource-staging-panel__hint {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.resource-staging-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.resource-card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.resource-card__top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.resource-card__filename {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-card__remove {
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  padding: 0.2rem;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+}
+
+.resource-card__remove:hover {
+  color: var(--color-danger);
+  background: var(--color-accent-soft);
+}
+
+.resource-card__notes {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  margin: 0;
+}
+
+.resource-card__preview {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.resource-card__processing-error {
+  font-size: 0.8125rem;
+  color: var(--color-danger);
+  margin: 0;
+}
+
+.resource-staging-panel__add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.resource-staging-panel__select,
+.resource-staging-panel__notes-input {
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  font-size: 0.8125rem;
+}
+
+.resource-staging-panel__notes-input {
+  flex: 1;
+  min-width: 10rem;
+}
+
+.resource-staging-panel__error {
+  color: var(--color-danger);
+  font-size: 0.8125rem;
+}

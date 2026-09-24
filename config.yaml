@@ -1,0 +1,64 @@
+# TKMiND Platform Configuration
+# Change settings here without touching any code.
+
+# ── Storage ──────────────────────────────────────────────────────────────────
+db_path: data/tkmind.db        # SQLite structured-data file
+
+# ── Reranker (visual Q&A pipeline, ported from PixelRAG) ─────────────────────
+reranker: gpt-4o
+top_k: 5
+mmr_lambda: 0.4
+rerank_top_n: 4
+
+# ── Ingestion ─────────────────────────────────────────────────────────────────
+pdf_dpi: 300
+max_tile_px: 1344
+
+# ── Answer synthesis (ported, kept for future Q&A reuse) ─────────────────────
+answer_model: gpt-4o
+crop_min_px: 900
+
+# ── Requirements extraction (module 1) ───────────────────────────────────────
+# Text extraction (PDF text layer / .docx), not vision — no image detail
+# setting needed. On gpt-4o for now (same provider as design alignment below —
+# switched from Claude Sonnet 5 temporarily; see ai/text/requirements_extractor.py's
+# module docstring for what switching back involves).
+extraction_model: gpt-4o
+# gpt-4o's completion ceiling is 16384 — every story now carries scenarios +
+# error handling even for capability-level docs (professional elaboration,
+# not just literal transcription), which uses meaningfully more output than
+# before. Leave headroom under the hard ceiling rather than sitting right at it.
+extraction_max_tokens: 16000
+
+# ── Design alignment check (module 2) ────────────────────────────────────────
+alignment_model: gpt-4o
+alignment_image_detail: high
+alignment_max_tokens: 1024
+# All approved stories are passed inline in the alignment prompt (phase-1 scale:
+# one PM, one designer, low volume — this is deliberately simple, not a stopgap).
+# If an approved requirements doc ever exceeds this many stories, the alignment
+# call raises instead of silently truncating — that's the signal to revisit this
+# with real retrieval (search.py) rather than guessing at a cutoff now.
+alignment_max_stories_inline: 60
+
+# ── Requirements intake — image resources (module 1 extension) ──────────────
+# A staged intake resource that's an image (a whiteboard photo, a screenshot)
+# gets transcribed via GPT-4o vision into plain text at upload time, then
+# merged into the same text-based extraction pipeline as every other
+# resource — see ai/vision/transcribe.py.
+intake_image_model: gpt-4o
+intake_image_detail: high
+intake_image_max_tokens: 2000
+
+# ── GPT-4o cost estimation (for ai_calls logging) ────────────────────────────
+# USD per 1,000,000 tokens. Update when OpenAI changes pricing.
+gpt4o_input_cost_per_million: 2.50
+gpt4o_output_cost_per_million: 10.00
+
+# ── Claude cost estimation (for ai_calls logging) ────────────────────────────
+# USD per 1,000,000 tokens for claude-sonnet-5. PLACEHOLDER VALUES — I don't
+# have a verified-current price for this exact model and didn't want to
+# assert a number with false confidence; check Anthropic's pricing page and
+# correct these before trusting the cost figures in ai_calls.
+claude_input_cost_per_million: 3.00
+claude_output_cost_per_million: 15.00

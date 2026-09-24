@@ -1,0 +1,82 @@
+.upload-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  padding: var(--space-7) var(--space-6);
+  background: var(--color-surface);
+  border: 2px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+  max-width: 520px;
+  margin: var(--space-7) auto;
+}
+
+.upload-prompt--drag {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.upload-prompt__icon {
+  font-size: 2.5rem;
+}
+
+.upload-prompt__title {
+  font-size: 1.125rem;
+}
+
+.upload-prompt__body {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  max-width: 40ch;
+}
+
+.upload-prompt__hint {
+  color: var(--color-text-tertiary);
+  font-size: 0.75rem;
+  margin-top: var(--space-1);
+}
+
+.upload-prompt__disabled {
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  background: var(--color-neutral-soft);
+  border: 1px solid var(--color-neutral-soft-border);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  max-width: 36ch;
+  text-align: center;
+}
+
+.upload-prompt__error {
+  color: var(--color-danger);
+  font-size: 0.8125rem;
+  background: var(--color-danger-soft);
+  border: 1px solid var(--color-danger-soft-border);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+}
+
+.upload-prompt__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.upload-prompt__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong);
+  border-top-color: var(--color-accent);
+  animation: upload-prompt-spin 0.7s linear infinite;
+}
+
+@keyframes upload-prompt-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

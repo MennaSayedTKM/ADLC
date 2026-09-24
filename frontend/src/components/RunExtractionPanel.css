@@ -1,0 +1,52 @@
+.run-extraction-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-soft-border);
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+
+.run-extraction-panel__title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--color-text);
+  margin: 0 0 0.2rem 0;
+}
+
+.run-extraction-panel__hint {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.run-extraction-panel__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.run-extraction-panel__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-strong);
+  border-top-color: var(--color-accent);
+  animation: run-extraction-panel-spin 0.7s linear infinite;
+}
+
+@keyframes run-extraction-panel-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.run-extraction-panel__error {
+  color: var(--color-danger);
+  font-size: 0.8125rem;
+}

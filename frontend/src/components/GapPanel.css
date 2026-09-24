@@ -1,0 +1,195 @@
+.gap-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gap-panel__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 0 var(--space-1);
+}
+
+.gap-panel__title {
+  font-size: 0.9375rem;
+}
+
+.gap-panel__count {
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+  font-weight: 600;
+}
+
+.gap-panel__empty {
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text-tertiary);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.gap-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gap-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  transition: opacity var(--transition-fast);
+}
+
+/* Severity stripe — scannable at a glance without reading the badge text */
+.gap-card--severity-high {
+  border-left-color: var(--color-danger);
+}
+.gap-card--severity-medium {
+  border-left-color: var(--color-warning);
+}
+.gap-card--severity-low {
+  border-left-color: var(--color-text-tertiary);
+}
+
+.gap-card--resolved,
+.gap-card--dismissed {
+  opacity: 0.65;
+}
+
+.gap-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.gap-card__page {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.gap-card__description {
+  font-size: 0.8438rem;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.gap-card--dismissed .gap-card__description {
+  text-decoration: line-through;
+  color: var(--color-text-tertiary);
+}
+
+.gap-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.gap-card__status-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+}
+
+.gap-card__status-label--resolved {
+  color: var(--color-success);
+}
+
+.gap-card__resolve-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.gap-card__epic-select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+}
+
+.gap-card__resolve-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+}
+
+.gap-card__error {
+  color: var(--color-danger);
+  font-size: 0.75rem;
+}
+
+.gap-card__mode-toggle {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.gap-card__mode-btn {
+  flex: 1;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: transparent;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.gap-card__mode-btn:hover {
+  color: var(--color-text-secondary);
+}
+
+.gap-card__mode-btn--active {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-color: var(--color-accent-soft-border);
+}
+
+.gap-card__draft-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-soft-border);
+}
+
+.gap-card__draft-badge {
+  align-self: flex-start;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.gap-card__draft-title {
+  font-weight: 600;
+  font-size: 0.8125rem;
+  color: var(--color-text);
+}
+
+.gap-card__draft-description {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.gap-card__draft-summary {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}

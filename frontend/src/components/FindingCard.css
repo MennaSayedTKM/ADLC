@@ -1,0 +1,89 @@
+.finding-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  transition: opacity var(--transition-fast), border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.finding-card--resolved,
+.finding-card--dismissed {
+  opacity: 0.65;
+}
+
+.finding-card--clickable {
+  cursor: pointer;
+}
+
+.finding-card--clickable:hover {
+  border-color: var(--color-border-strong);
+}
+
+.finding-card--active {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.finding-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.finding-card__region-hint {
+  font-size: 0.6875rem;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.finding-card--active .finding-card__region-hint {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.finding-card__issue {
+  font-size: 0.875rem;
+  color: var(--color-text);
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.finding-card--dismissed .finding-card__issue {
+  text-decoration: line-through;
+  color: var(--color-text-tertiary);
+}
+
+.finding-card__recommendation {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.finding-card__recommendation-label {
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  font-size: 0.6875rem;
+  letter-spacing: 0.03em;
+}
+
+.finding-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.finding-card__status-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+}
+
+.finding-card__status-label--resolved {
+  color: var(--color-success);
+}
