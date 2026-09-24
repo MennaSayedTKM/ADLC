@@ -18,5 +18,10 @@ config:
   adlc:scheduleTimezone: Asia/Dubai
   adlc:openaiApiKey:
     secure: v1:td3aIVhd75WDGOV1:QiW3TUr5Dd8ndhtft4eyaA5HK9t8fjlQLnedkdfko/Cfx+OwlcXnlOOkS5Gh2ecvm8qmol9IqwI0sW3wgdZGnugBHC6ET4claUcQOErJwor2eJMJmGRFW0ox78oWuonCBLPy47cOfn1WhVPEJr/n419B70UHix1hq+REPHappVbgjpz0N4Sk2eTo4f+uW2ZtBjydRxRR4DBkYKk/vSDXCisBhQp778yTcKWnBb7tzE2EOiKcHgQn
+  adlc:confluenceBaseUrl: https://tk-mind.atlassian.net/wiki
+  adlc:confluenceEmail: menna.sayed@tkmind.net
+  adlc:confluenceSpaceKey: ADLC
+  adlc:confluenceApiToken:
+    secure: v1:DiAIBiupH29ogu0K:FWd3LptJv0zLawiPQnjzUZOwZ+CNhPyH+6xU4J/ilgSnTUc5i0MoCROKezsTpxFZSPARJcK9BQhxMo4mJltcR2/VDCpSdrOqjEKdPdo3x77F96YcC+pln2Xu7jFn87xZAp6EqpnBMgI9xnQs58WJc+k8CTV2WnMSp8x53SY9ya//koFfmbcj0pK2FojCv94HwHumBcc+nyRucIgOoq0YrCw43F55mT/7Si1uPrrqvMGc9keoTwVn/KrmNR+VIRl7z9eAb8R3/VRGkmw3VlvO8w==
 secretsprovider: awskms://alias/adlc-pulumi?region=eu-central-1&awssdk=v2&profile=adlc
 encryptedkey: AQICAHgQ95duvPtP+2bmxAmGES4Nb3ToM3vvlSgZi4T8w4zWsAEalpSGGP0JgZ8FA/XBqzlLAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMsPPtJRlq0kXP9GfbAgEQgDv1h4YeOTJogP25zdGBSXRMnW0nQRTX67w4f2M2fJ7tQ9jz6Wxk0hHdTAfJmAM/HjRj8Ud+2Bn3RdK9wA==
