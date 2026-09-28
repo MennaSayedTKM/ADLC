@@ -19,8 +19,11 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# libgomp: OpenMP runtime used by faiss-cpu
+# Debian security updates for the base image's own packages (the ECR scan
+# flags e.g. zlib/perl CVEs in python:3.12-slim until the base is rebuilt),
+# plus libgomp: OpenMP runtime used by faiss-cpu.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 

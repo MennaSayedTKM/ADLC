@@ -117,8 +117,10 @@ produce incompatible vectors, so switching providers means rebuilding
 
 ## Deployment
 
-ADLC is deployed to AWS with Pulumi. [infra/README.md](infra/README.md) has
-the architecture and step-by-step instructions.
+ADLC runs on AWS ECS Fargate, deployed with Pulumi. Pushing to `main`
+builds the container image and pushes it to Amazon ECR through GitHub
+Actions. [infra/README.md](infra/README.md) covers the architecture,
+deploying new code, and day-to-day operations.
 
 ## Running locally
 

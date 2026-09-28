@@ -30,6 +30,8 @@ mocks.install(
         "adlc:serveFrom": "fargate",
         "adlc:ec2AppEnabled": "true",
         "adlc:appScheduleEnabled": "true",
+        "adlc:githubOwnerId": "295564551",
+        "adlc:githubRepoId": "1385264226",
     },
     mocks.SECRET_KEYS,
 )
@@ -145,6 +147,10 @@ def test_ecr_repository_scans_images_and_expires_old_ones():
     assert repo["imageScanningConfiguration"] == {"scanOnPush": True}
     rules = json.loads(_one("aws:ecr/lifecyclePolicy:LifecyclePolicy", "adlc-prod-ecr-lifecycle")["policy"])["rules"]
     assert {r["selection"]["tagStatus"] for r in rules} == {"untagged", "any"}
+    # the registry-level config overrides scanOnPush — it must actually scan this repo
+    (rule,) = _one("aws:ecr/registryScanningConfiguration:RegistryScanningConfiguration", "adlc-prod-ecr-scanning")["rules"]
+    assert rule["scanFrequency"] == "SCAN_ON_PUSH"
+    assert rule["repositoryFilters"] == [{"filter": "adlc", "filterType": "WILDCARD"}]
 
 
 def test_github_actions_role_trusts_only_this_repos_main_branch():
@@ -152,7 +158,12 @@ def test_github_actions_role_trusts_only_this_repos_main_branch():
     assert oidc["url"] == "https://token.actions.githubusercontent.com"
     trust = json.loads(_one("aws:iam/role:Role", "adlc-prod-github-actions-role")["assumeRolePolicy"])
     conditions = trust["Statement"][0]["Condition"]["StringEquals"]
-    assert conditions["token.actions.githubusercontent.com:sub"] == "repo:MennaSayedTKM/ADLC:ref:refs/heads/main"
+    # exact matches only (StringEquals, no wildcards), including GitHub's
+    # immutable-ID form of the subject
+    assert conditions["token.actions.githubusercontent.com:sub"] == [
+        "repo:MennaSayedTKM/ADLC:ref:refs/heads/main",
+        "repo:MennaSayedTKM@295564551/ADLC@1385264226:ref:refs/heads/main",
+    ]
     assert conditions["token.actions.githubusercontent.com:aud"] == "sts.amazonaws.com"
 
 

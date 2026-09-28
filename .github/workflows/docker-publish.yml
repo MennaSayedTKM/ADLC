@@ -74,6 +74,10 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
+          # Push a plain image manifest (no attestation index): ECR's basic
+          # scan-on-push can only scan plain images.
+          provenance: false
+          sbom: false
           tags: |
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}

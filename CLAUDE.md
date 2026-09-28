@@ -22,7 +22,13 @@ build brief (historical — some details changed during the build).
   the original Colab notebook. Keep their model, prompts and pooling identical. Its vectors
   are incompatible with Cohere's — never mix providers in one FAISS index.
 - `infra/` — Pulumi (Python) deployment to AWS: one Control Tower member account, eu-central-1.
-  See `infra/README.md`. Infra tests run offline: `cd infra; venv\Scripts\python -m pytest tests`
+  ECS Fargate (exactly one task — single-writer SQLite) behind an ALB + Cognito, `data/` on
+  EFS, image in ECR. See `infra/README.md`. Infra tests run offline:
+  `cd infra; venv\Scripts\python -m pytest tests`
+- `Dockerfile`, `docker/entrypoint.sh`, `backend/app/serve.py` — the production container: one
+  uvicorn process serving the API under `/api` and the built frontend at `/`
+- `.github/workflows/docker-publish.yml` — tests, builds and pushes the image to ECR on push to
+  `main` (OIDC, no stored AWS keys). Tests must pass without a `.env` (CI has none).
 - `frontend/src/` — React + Vite + TypeScript; `api/client.ts` calls `/api/*`
 - `config.yaml` + `config.py` — every tunable value; `.env` — secrets
 

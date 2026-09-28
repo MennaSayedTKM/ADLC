@@ -72,6 +72,12 @@ ec2_app_enabled = _flag("ec2AppEnabled", False)
 keep_legacy_data_volume = _flag("keepLegacyDataVolume", True)
 github_repo = cfg.get("githubRepo") or "MennaSayedTKM/ADLC"
 git_branch = cfg.get("gitBranch") or "main"
+# GitHub's OIDC subject may carry immutable owner/repo IDs
+# ("repo:Owner@123/Repo@456:ref:..."), which a renamed or re-created repo
+# can't impersonate. Both IDs come from a CloudTrail AssumeRoleWithWebIdentity
+# event (or the GitHub API).
+github_owner_id = cfg.get("githubOwnerId")
+github_repo_id = cfg.get("githubRepoId")
 app_instance_type = cfg.get("appInstanceType") or "t3.large"
 data_volume_gb = cfg.get_int("dataVolumeGb") or 50
 snapshot_retain_count = cfg.get_int("snapshotRetainCount") or 14
@@ -274,12 +280,31 @@ aws.ecr.LifecyclePolicy(
         }
     ),
 )
+# The registry-level scanning configuration overrides the repository's
+# scan_on_push, and in this account it defaults to BASIC with no rules — i.e.
+# nothing is scanned. Basic scanning (free) on every push of the adlc repo.
+aws.ecr.RegistryScanningConfiguration(
+    f"{prefix}-ecr-scanning",
+    scan_type="BASIC",
+    rules=[
+        aws.ecr.RegistryScanningConfigurationRuleArgs(
+            scan_frequency="SCAN_ON_PUSH",
+            repository_filters=[
+                aws.ecr.RegistryScanningConfigurationRuleRepositoryFilterArgs(filter="adlc", filter_type="WILDCARD")
+            ],
+        )
+    ],
+)
 image = pulumi.Output.from_input(image_override) if image_override else ecr_repo.repository_url.apply(
     lambda url: f"{url}:{image_tag}"
 )
 
 # GitHub Actions signs in with a short-lived OIDC token — no AWS keys stored
 # in GitHub. Only the main branch of this repository can assume the role.
+_owner, _repo = github_repo.split("/", 1)
+github_oidc_subjects = [f"repo:{github_repo}:ref:refs/heads/{git_branch}"]
+if github_owner_id and github_repo_id:
+    github_oidc_subjects.append(f"repo:{_owner}@{github_owner_id}/{_repo}@{github_repo_id}:ref:refs/heads/{git_branch}")
 github_oidc = aws.iam.OpenIdConnectProvider(
     f"{prefix}-github-oidc",
     url="https://token.actions.githubusercontent.com",
@@ -301,7 +326,7 @@ github_role = aws.iam.Role(
                         "Condition": {
                             "StringEquals": {
                                 "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-                                "token.actions.githubusercontent.com:sub": f"repo:{github_repo}:ref:refs/heads/{git_branch}",
+                                "token.actions.githubusercontent.com:sub": github_oidc_subjects,
                             }
                         },
                     }
