@@ -131,10 +131,12 @@ def test_secrets_are_secure_strings_and_env_includes_embed_url():
     assert "/adlc/prod/env/ANTHROPIC_API_KEY" not in params
 
 
-def test_app_role_reads_only_this_stacks_parameters():
+def test_app_role_reads_only_this_stacks_parameters_and_cohere_embeddings():
     policy = json.loads(_one("aws:iam/rolePolicy:RolePolicy", "adlc-prod-app-policy")["policy"])
-    resources = policy["Statement"][0]["Resource"]
-    assert all(r.startswith("arn:aws:ssm:*:*:parameter/adlc/prod") for r in resources)
+    ssm, bedrock = policy["Statement"]
+    assert all(r.startswith("arn:aws:ssm:*:*:parameter/adlc/prod") for r in ssm["Resource"])
+    assert bedrock["Action"] == "bedrock:InvokeModel"
+    assert all("cohere.embed-v4" in r for r in bedrock["Resource"])  # no other Bedrock models
 
 
 def test_data_volume_is_encrypted_tagged_for_backup_and_snapshotted():

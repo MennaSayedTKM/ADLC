@@ -250,7 +250,7 @@ class AiCall(Base):
             "call_type in ('extraction','alignment','rerank','crop','synthesis',"
             "'suggestions','item_draft','intake_transcription','clarifying_questions',"
             "'policy_coverage','source_material_review','output_story_review',"
-            "'artifact_quality_review')",
+            "'artifact_quality_review','embedding')",
             name="ck_ai_calls_call_type",
         ),
     )

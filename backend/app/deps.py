@@ -37,7 +37,18 @@ def get_confluence_client() -> ConfluenceClient:
     return ConfluenceClient(base_url=base_url, email=email, api_token=token, space_key=space_key)
 
 
-def get_embed_client() -> EmbedClient:
+def get_embed_client():
+    """EmbedClient (self-hosted Qwen3-VL server) or BedrockEmbedClient
+    (Cohere Embed v4) — same interface, chosen by config.yaml's embed_provider."""
+    from config import EMBED_PROVIDER
+
+    if EMBED_PROVIDER == "bedrock":
+        from ai.bedrock_embed_client import make_client_from_config
+
+        return make_client_from_config()
+    if EMBED_PROVIDER != "http":
+        raise HTTPException(status_code=503, detail=f"Unknown embed_provider {EMBED_PROVIDER!r} in config.yaml")
+
     url = os.environ.get("EMBED_API_URL", "")
     if not url:
         raise HTTPException(status_code=503, detail="EMBED_API_URL is not set in .env")

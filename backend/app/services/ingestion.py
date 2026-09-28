@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from ai.embed_client import EmbedClient
 from ai.ingest.ingest import ingest_file
 
-from ..db.models import Document
+from ..db.models import AiCall, Document
 
 
 def _next_version(session: Session, project_id: str, doc_type: str) -> int:
@@ -55,4 +55,34 @@ def ingest_document(
     pages_indexed = ingest_file(
         file_path, client, progress_cb=progress_cb, document_id=doc.id
     )
+    _log_embedding_usage(session, doc, client)
     return doc, pages_indexed
+
+
+def _log_embedding_usage(session: Session, doc: Document, client) -> None:
+    """Paid embedding providers (Bedrock) report token usage; log it like
+    every other AI call. The self-hosted Qwen3-VL server has no per-call
+    cost and no pop_usage(), so nothing is logged for it."""
+    pop_usage = getattr(client, "pop_usage", None)
+    if pop_usage is None:
+        return
+    usage = pop_usage()
+    if not usage.get("calls"):
+        return
+
+    from ai.bedrock_embed_client import estimate_cost_usd
+    from config import COHERE_EMBED_IMAGE_COST_PER_MILLION, COHERE_EMBED_TEXT_COST_PER_MILLION
+
+    session.add(
+        AiCall(
+            document_id=doc.id,
+            project_id=doc.project_id,
+            call_type="embedding",
+            model=client.model_id,
+            input_tokens=usage["image_tokens"] + usage["text_tokens"],
+            output_tokens=0,
+            estimated_cost_usd=estimate_cost_usd(
+                usage, COHERE_EMBED_IMAGE_COST_PER_MILLION, COHERE_EMBED_TEXT_COST_PER_MILLION
+            ),
+        )
+    )

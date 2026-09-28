@@ -1,7 +1,8 @@
 """
 ingest.py
-Render PDFs and images to tiles, embed each tile via the Colab server,
-and add them to the FAISS index + metadata store.
+Render PDFs and images to tiles, embed each tile via the configured embedding
+client (Cohere Embed v4 on Bedrock, or the Colab/GPU Qwen3-VL server), and add
+them to the FAISS index + metadata store.
 
 Ported from PixelRAG's ingest.py. Pipeline logic is
 unchanged (render -> tile -> embed -> FAISS); the only addition is an optional
@@ -162,6 +163,14 @@ def ingest_file(
         return 0
 
     index = _load_index(dim)
+    if index.d != dim:
+        # e.g. the index was built with the Qwen3-VL server and this upload
+        # used Cohere Embed v4 (or vice versa) — the vectors aren't comparable.
+        raise ValueError(
+            f"The existing FAISS index holds {index.d}-dimensional vectors but this embedding "
+            f"model produces {dim}. The index was built with a different embedding provider; "
+            "rebuild it (ai.ingest.ingest.clear_index + re-ingest) before mixing providers."
+        )
     start_id = index.ntotal
     index.add(np.stack(new_vectors))
 

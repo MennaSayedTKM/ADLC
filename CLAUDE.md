@@ -14,9 +14,13 @@ build brief (historical — some details changed during the build).
 - `ai/text/` — PDF text-layer / DOCX extraction and the requirements extractor
 - `ai/vision/` — GPT-4o vision: design alignment checker, intake image transcription,
   rerank/answer synthesis (kept for future Q&A)
-- `ai/embed_client.py` — `EmbedClient` for the embedding server (retry + `EmbedServerError`)
-- `embed_server/` — Qwen3-VL embedding server: `server.py` (runs on the AWS GPU instance) and
-  the original Colab notebook. Keep their model, prompts and pooling identical.
+- `ai/bedrock_embed_client.py` — **default** embedding client: Cohere Embed v4 on Amazon
+  Bedrock (`embed_provider: bedrock` in `config.yaml`). Same interface as `EmbedClient`.
+- `ai/embed_client.py` — `EmbedClient` for the self-hosted Qwen3-VL server (retry +
+  `EmbedServerError`), used when `embed_provider: http`
+- `embed_server/` — Qwen3-VL embedding server: `server.py` (optional AWS GPU instance) and
+  the original Colab notebook. Keep their model, prompts and pooling identical. Its vectors
+  are incompatible with Cohere's — never mix providers in one FAISS index.
 - `infra/` — Pulumi (Python) deployment to AWS: one Control Tower member account, eu-central-1.
   See `infra/README.md`. Infra tests run offline: `cd infra; venv\Scripts\python -m pytest tests`
 - `frontend/src/` — React + Vite + TypeScript; `api/client.ts` calls `/api/*`

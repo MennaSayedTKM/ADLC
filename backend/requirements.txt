@@ -20,6 +20,9 @@ requests==2.34.2
 Pillow==12.3.0
 numpy==2.5.1
 
+# Embeddings: Cohere Embed v4 on Amazon Bedrock (config.yaml embed_provider)
+boto3==1.43.103
+
 # GPT-4o vision (design alignment, rerank, answer synthesis)
 openai==2.48.0
 # Claude text extraction (requirements & change requests)

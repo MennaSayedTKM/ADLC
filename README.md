@@ -74,7 +74,8 @@ python -m venv .venv
 | Variable | Required | Purpose |
 |---|---|---|
 | `OPENAI_API_KEY` | yes | GPT-4o extraction, alignment, evaluation, transcription |
-| `EMBED_API_URL` | yes, for ingestion | Base URL of the embedding server |
+| `AWS_PROFILE` | yes, for design uploads | AWS profile used for Bedrock embeddings locally (`adlc`) |
+| `EMBED_API_URL` | only with `embed_provider: http` | Base URL of the self-hosted Qwen3-VL embedding server |
 | `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN`, `CONFLUENCE_SPACE_KEY` | optional | Only for "Publish to Confluence"; returns 503 if unset |
 | `ANTHROPIC_API_KEY` | no | Unused while `extraction_model` is `gpt-4o` |
 | `JINA_API_KEY` | no | Only if `reranker` is set to the Jina model |
@@ -100,16 +101,19 @@ npm install
 cd ..
 ```
 
-## Embedding server
+## Embeddings
 
-Ingestion needs the embedding server from
-`embed_server/colab_embed_server.ipynb`. Open it in Google
-Colab with a GPU runtime, add your ngrok auth token, run all cells, and put
-the printed ngrok URL in `.env` as `EMBED_API_URL`. The URL changes every
-time the notebook restarts.
+Design screens are embedded into the FAISS index with **Cohere Embed v4 on
+Amazon Bedrock** (`embed_provider: bedrock` in `config.yaml`). This is a
+managed, pay-per-call service, so no GPU is needed. Locally it uses your
+AWS login: set `AWS_PROFILE=adlc` in `.env` and run `aws sso login
+--profile adlc`. On AWS the server's role is used automatically.
 
-In AWS the same model runs as a service (`embed_server/server.py`) on a GPU
-instance. See [infra/README.md](infra/README.md).
+The previous self-hosted model (Qwen3-VL via
+`embed_server/colab_embed_server.ipynb` or `embed_server/server.py`) is still
+available with `embed_provider: http` and `EMBED_API_URL` in `.env`. The two
+produce incompatible vectors, so switching providers means rebuilding
+`data/index.faiss`.
 
 ## Deployment
 

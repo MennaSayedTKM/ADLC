@@ -14,6 +14,18 @@ rerank_top_n: 4
 pdf_dpi: 300
 max_tile_px: 1344
 
+# ── Embeddings (visual RAG index: design screens → FAISS) ────────────────────
+# bedrock: Cohere Embed v4 on Amazon Bedrock (managed, pay per call, no GPU).
+#          Needs AWS credentials: the instance role on AWS; locally
+#          AWS_PROFILE=adlc in .env + `aws sso login --profile adlc`.
+# http:    the self-hosted Qwen3-VL server at EMBED_API_URL (Colab/GPU).
+# The two produce incompatible vectors — switching providers means
+# rebuilding data/index.faiss (ingest_file refuses to mix them).
+embed_provider: bedrock
+bedrock_embed_model: eu.cohere.embed-v4:0
+bedrock_region: eu-central-1
+embed_dimension: 1536            # Cohere Embed v4 supports 256 / 512 / 1024 / 1536
+
 # ── Answer synthesis (ported, kept for future Q&A reuse) ─────────────────────
 answer_model: gpt-4o
 crop_min_px: 900
@@ -54,6 +66,14 @@ intake_image_max_tokens: 2000
 # USD per 1,000,000 tokens. Update when OpenAI changes pricing.
 gpt4o_input_cost_per_million: 2.50
 gpt4o_output_cost_per_million: 10.00
+
+# ── Cohere Embed v4 on Bedrock cost estimation (for ai_calls logging) ────────
+# USD per 1,000,000 input tokens (embeddings have no output tokens). From the
+# AWS Price List API, 2026-09-28: "Cohere Embed 4 Model (Amazon Bedrock
+# Edition)", eu-central-1, one input-token rate covering text and image
+# tokens alike. Kept as two keys in case the rates ever diverge.
+cohere_embed_text_cost_per_million: 0.12
+cohere_embed_image_cost_per_million: 0.12
 
 # ── Claude cost estimation (for ai_calls logging) ────────────────────────────
 # USD per 1,000,000 tokens for claude-sonnet-5. PLACEHOLDER VALUES — I don't

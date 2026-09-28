@@ -214,7 +214,18 @@ app_profile = _instance_profile(
                         f"arn:aws:ssm:*:*:parameter{param_prefix}/*",
                         f"arn:aws:ssm:*:*:parameter{param_prefix}",
                     ],
-                }
+                },
+                {
+                    # Design-screen embeddings: Cohere Embed v4 on Bedrock
+                    # (config.yaml embed_provider: bedrock). The EU inference
+                    # profile may route to any EU region's copy of the model.
+                    "Effect": "Allow",
+                    "Action": "bedrock:InvokeModel",
+                    "Resource": [
+                        "arn:aws:bedrock:*::foundation-model/cohere.embed-v4*",
+                        "arn:aws:bedrock:*:*:inference-profile/*cohere.embed-v4*",
+                    ],
+                },
             ],
         }
     ),

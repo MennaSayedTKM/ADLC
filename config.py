@@ -34,6 +34,12 @@ RERANK_TOP_N = int(_require("rerank_top_n"))
 PDF_DPI = int(_require("pdf_dpi"))
 MAX_TILE_PX = int(_require("max_tile_px"))
 
+# Embeddings
+EMBED_PROVIDER = str(_require("embed_provider")).strip()
+BEDROCK_EMBED_MODEL = str(_require("bedrock_embed_model"))
+BEDROCK_REGION = str(_require("bedrock_region"))
+EMBED_DIMENSION = int(_require("embed_dimension"))
+
 # Answer synthesis
 ANSWER_MODEL = str(_require("answer_model"))
 CROP_MIN_PX = int(_require("crop_min_px"))
@@ -56,6 +62,10 @@ INTAKE_IMAGE_MAX_TOKENS = int(_require("intake_image_max_tokens"))
 # GPT-4o cost estimation
 GPT4O_INPUT_COST_PER_MILLION = float(_require("gpt4o_input_cost_per_million"))
 GPT4O_OUTPUT_COST_PER_MILLION = float(_require("gpt4o_output_cost_per_million"))
+
+# Cohere Embed v4 (Bedrock) cost estimation
+COHERE_EMBED_TEXT_COST_PER_MILLION = float(_require("cohere_embed_text_cost_per_million"))
+COHERE_EMBED_IMAGE_COST_PER_MILLION = float(_require("cohere_embed_image_cost_per_million"))
 
 # Claude cost estimation
 CLAUDE_INPUT_COST_PER_MILLION = float(_require("claude_input_cost_per_million"))
