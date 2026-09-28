@@ -57,8 +57,19 @@ def _fake_tool_call_client(tool_name: str, arguments_json: str):
     return factory
 
 
+def _no_openai_calls():
+    client = MagicMock()
+    client.chat.completions.create.side_effect = AssertionError("This test made an OpenAI call without mocking it")
+    return client
+
+
 @pytest.fixture
 def client():
+    # The intake endpoints depend on get_openai_client even for requests
+    # that make no AI call (staging a PDF, listing, deleting). Default to a
+    # client that fails loudly if used; tests that exercise an AI call
+    # override it with a canned fake.
+    app.dependency_overrides[get_openai_client] = _no_openai_calls
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

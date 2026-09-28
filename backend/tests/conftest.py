@@ -21,6 +21,24 @@ _TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="tkmind_test_data_"))
 os.environ["TKMIND_DATA_DIR"] = str(_TEST_DATA_DIR)
 os.environ["TKMIND_DB_PATH"] = str(_TEST_DATA_DIR / "test.db")
 
+# Tests must never see the developer's real credentials from .env: a test
+# that forgets to mock a client would otherwise pass locally (and could make
+# a real, billed call) but fail in CI, where there is no .env. Blank values
+# are set before main.py's load_dotenv() runs, which never overrides
+# variables that already exist — so locally and in CI the tests see the
+# same thing: no keys, only the fakes each test installs.
+for _secret in (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "JINA_API_KEY",
+    "CONFLUENCE_API_TOKEN",
+    "CONFLUENCE_BASE_URL",
+    "CONFLUENCE_EMAIL",
+    "CONFLUENCE_SPACE_KEY",
+    "EMBED_API_URL",
+):
+    os.environ[_secret] = ""
+
 from app.db.base import Base  # noqa: E402
 from app.db import models  # noqa: E402,F401  (registers tables on Base.metadata)
 from app.db.session import engine  # noqa: E402
