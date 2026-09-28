@@ -1,0 +1,87 @@
+# Tests the backend, then builds the ADLC image and pushes it to Amazon ECR
+# (repository "adlc" in ADLC-Prod) as :latest and :<commit sha>.
+#
+# Signs in to AWS with GitHub's OIDC token — no AWS keys are stored in
+# GitHub. The role (infra/: githubActionsRoleArn) only trusts the main
+# branch of this repository and may only push this image and redeploy the
+# ECS service.
+#
+# Repository setting needed (Settings → Secrets and variables → Actions →
+# Variables): AWS_ROLE_ARN = output of `pulumi stack output githubActionsRoleArn`
+#
+# Deploying: pushes to main only build + push. Start the workflow by hand
+# (Actions → Build and push image → Run workflow) with "deploy" ticked to
+# also roll the new image out, or run `pulumi stack output deployCommand`.
+
+name: Build and push image
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "infra/**"
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Also redeploy the ECS service with the new image"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write # for the AWS OIDC sign-in
+
+concurrency:
+  group: docker-publish
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: eu-central-1
+  ECR_REPOSITORY: adlc
+  ECS_CLUSTER: adlc-prod
+  ECS_SERVICE: adlc-prod-app
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      - run: python -m pytest -q
+        working-directory: backend
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Redeploy ECS service
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy }}
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --force-new-deployment \
+            --query "service.deployments[0].rolloutState" --output text

@@ -2,7 +2,12 @@
 Runs the whole Pulumi program under mocks — no AWS account or credentials
 needed. Catches wrong resource arguments (pulumi-aws raises TypeError) and
 checks the security-relevant wiring: who can reach what, where secrets go,
-and that the bootstrap scripts are fully rendered.
+and how the Fargate service is set up.
+
+This module imports the program once, in the "cutover" configuration:
+Fargate serving traffic, the legacy EC2 server still present, work-hours
+schedule on, image from the stack's ECR repository. Other configurations
+are checked in test_stages.py (separate processes).
 
 Run from infra/:  venv\\Scripts\\python -m pytest tests
 """
@@ -14,57 +19,26 @@ from pathlib import Path
 import pulumi
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-_resources: list[tuple[str, str, dict]] = []  # (type, name, inputs)
+import mocks  # noqa: E402
 
-
-class Mocks(pulumi.runtime.Mocks):
-    def new_resource(self, args: pulumi.runtime.MockResourceArgs):
-        state = dict(args.inputs)
-        rid = f"{args.name}-id"
-        if args.typ == "aws:ebs/volume:Volume":
-            rid = "vol-0123456789abcdef0"
-        if args.typ == "aws:ec2/instance:Instance":
-            state["privateIp"] = "10.40.0.25"
-            state["arn"] = f"arn:aws:ec2:eu-central-1:111111111111:instance/{rid}"
-        if args.typ == "aws:lb/loadBalancer:LoadBalancer":
-            state["dnsName"] = "adlc-prod-alb-123.eu-central-1.elb.amazonaws.com"
-            state["arn"] = "arn:aws:elasticloadbalancing:eu-central-1:111111111111:loadbalancer/app/x/1"
-        if args.typ == "tls:index/privateKey:PrivateKey":
-            state.update(privateKeyPem="PEM", privateKeyOpenssh="OPENSSH", publicKeyOpenssh="ssh-ed25519 AAAA")
-        if args.typ == "tls:index/selfSignedCert:SelfSignedCert":
-            state["certPem"] = "CERT"
-        if args.typ == "random:index/randomString:RandomString":
-            state["result"] = "abc123"
-        state.setdefault("arn", f"arn:aws:mock:::{args.name}")
-        _resources.append((args.typ, args.name, dict(args.inputs)))
-        return rid, state
-
-    def call(self, args: pulumi.runtime.MockCallArgs):
-        if args.token == "aws:index/getAvailabilityZones:getAvailabilityZones":
-            return {"names": ["eu-central-1a", "eu-central-1b", "eu-central-1c"], "zoneIds": ["a", "b", "c"]}
-        if args.token == "aws:ssm/getParameter:getParameter":
-            return {"name": args.args["name"], "value": "ami-0123456789", "type": "String"}
-        return {}
-
-
-pulumi.runtime.set_mocks(Mocks(), project="adlc", stack="prod", preview=False)
-pulumi.runtime.set_all_config(
-    {"aws:region": "eu-central-1", "adlc:openaiApiKey": "sk-test-not-real"},
-    secret_keys=["adlc:openaiApiKey"],
+IMAGE = "111111111111.dkr.ecr.eu-central-1.amazonaws.com/adlc:latest"
+mocks.install(
+    {
+        **mocks.BASE_CONFIG,
+        "adlc:serveFrom": "fargate",
+        "adlc:ec2AppEnabled": "true",
+        "adlc:appScheduleEnabled": "true",
+    },
+    mocks.SECRET_KEYS,
 )
 
 import adlc_stack  # noqa: E402  (must import after mocks are set)
 
 
 def _by_type(typ: str) -> list[tuple[str, dict]]:
-    return [(name, inputs) for t, name, inputs in _resources if t == typ]
-
-
-def _plain(value):
-    """pulumi-aws marks some inputs (e.g. ssm.Parameter.value) secret; mocks
-    then see Pulumi's secret wrapper {<sig>: <secret sig>, "value": ...}."""
-    return value["value"] if isinstance(value, dict) and "value" in value else value
+    return [(name, inputs) for t, name, inputs in mocks.resources if t == typ]
 
 
 def _one(typ: str, name: str) -> dict:
@@ -74,82 +48,137 @@ def _one(typ: str, name: str) -> dict:
 
 
 @pulumi.runtime.test
-def test_program_builds_and_app_user_data_is_fully_rendered():
-    def check(user_data):
-        assert "__" not in user_data.replace("__pycache__", ""), "unrendered placeholder in app user-data"
-        assert "\r" not in user_data
-        assert 'DATA_VOLUME_ID="vol-0123456789abcdef0"' in user_data
-        assert 'PARAM_PREFIX="/adlc/prod"' in user_data
-        assert 'REPO="MennaSayedTKM/ADLC"' in user_data
-        assert "sk-test-not-real" not in user_data  # secrets go via SSM, never user-data
-        assert "--workers 1" in user_data  # single-writer SQLite + in-process FAISS
-
-    return adlc_stack.app_instance.user_data.apply(check)
+def test_program_builds():
+    return adlc_stack.alb.arn.apply(lambda arn: arn is not None)
 
 
-def test_embed_user_data_inlines_server_code():
-    inputs = _one("aws:ec2/instance:Instance", "adlc-prod-embed")
-    user_data = inputs["userData"]
-    assert "__SERVER_PY_B64__" not in user_data and "__REQUIREMENTS_B64__" not in user_data
-    assert inputs["userDataReplaceOnChange"] is True
-    assert inputs["instanceType"] == "g4dn.xlarge"
+def test_descriptions_use_only_characters_aws_accepts():
+    # IAM and EC2 reject descriptions outside Latin-1 (e.g. an em dash) at
+    # create time — which the mocks otherwise wouldn't catch.
+    for typ, name, inputs in mocks.resources:
+        text = inputs.get("description")
+        if isinstance(text, str):
+            assert all(ch in "\t\n\r" or 0x20 <= ord(ch) <= 0x7E or 0xA1 <= ord(ch) <= 0xFF for ch in text), (
+                f"{typ} {name}: {text!r}"
+            )
 
 
-def test_nothing_but_the_alb_is_reachable_from_the_internet():
-    ingress = _by_type("aws:vpc/securityGroupIngressRule:SecurityGroupIngressRule")
-    open_to_world = sorted(name for name, i in ingress if i.get("cidrIpv4") == "0.0.0.0/0")
-    assert open_to_world == ["adlc-prod-alb-in-443", "adlc-prod-alb-in-80"]
-    app_in = _one("aws:vpc/securityGroupIngressRule:SecurityGroupIngressRule", "adlc-prod-app-in-alb")
-    embed_in = _one("aws:vpc/securityGroupIngressRule:SecurityGroupIngressRule", "adlc-prod-embed-in-app")
-    assert "referencedSecurityGroupId" in app_in and app_in["fromPort"] == 80
-    assert "referencedSecurityGroupId" in embed_in and embed_in["fromPort"] == 8000
-    assert not any(i.get("fromPort") == 22 for _, i in ingress)  # no SSH: Session Manager only
+def test_container_definition():
+    task = _one("aws:ecs/taskDefinition:TaskDefinition", "adlc-prod-app")
+    assert task["requiresCompatibilities"] == ["FARGATE"]
+    assert (task["cpu"], task["memory"]) == ("1024", "4096")
+    (container,) = json.loads(task["containerDefinitions"])
+    assert container["image"] == IMAGE
+    assert container["portMappings"] == [{"containerPort": 8080, "protocol": "tcp"}]
+    assert container["mountPoints"][0]["containerPath"] == "/app/data"
+    assert "repositoryCredentials" not in container  # ECR: pulled with the execution role, no stored token
+    # every secret comes from this stack's SSM parameters, never inline
+    secrets = {s["name"]: s["valueFrom"] for s in container["secrets"]}
+    assert set(secrets) == {"OPENAI_API_KEY", "CONFLUENCE_BASE_URL"}
+    assert "environment" not in container
+    assert "sk-test-not-real" not in task["containerDefinitions"]
+
+    (volume,) = task["volumes"]
+    efs = volume["efsVolumeConfiguration"]
+    assert efs["transitEncryption"] == "ENABLED"
+    assert efs["authorizationConfig"]["iam"] == "ENABLED"
 
 
-def test_https_listener_requires_cognito_login_before_forwarding():
+def test_service_runs_exactly_one_task_behind_the_alb():
+    service = _one("aws:ecs/service:Service", "adlc-prod-app")
+    assert service["launchType"] == "FARGATE"
+    assert service["desiredCount"] == 1
+    # single-writer SQLite on EFS: the old task stops before the new one starts
+    assert service["deploymentMinimumHealthyPercent"] == 0
+    assert service["deploymentMaximumPercent"] == 100
+    assert service["deploymentCircuitBreaker"] == {"enable": True, "rollback": True}
+    assert service["networkConfiguration"]["assignPublicIp"] is True
+    assert service["loadBalancers"][0]["containerPort"] == 8080
+
+
+def test_https_listener_logs_in_then_forwards_to_fargate():
     listener = _one("aws:lb/listener:Listener", "adlc-prod-https")
     actions = sorted(listener["defaultActions"], key=lambda a: a["order"])
     assert [a["type"] for a in actions] == ["authenticate-cognito", "forward"]
-    http = _one("aws:lb/listener:Listener", "adlc-prod-http")
-    assert http["defaultActions"][0]["type"] == "redirect"
+    assert actions[1]["targetGroupArn"] == "arn:aws:mock:::adlc-prod-fargate-tg"
+    assert _one("aws:lb/listener:Listener", "adlc-prod-http")["defaultActions"][0]["type"] == "redirect"
 
 
-def test_user_pool_is_invite_only_and_callback_matches_alb():
-    pool = _one("aws:cognito/userPool:UserPool", "adlc-prod-users")
-    assert pool["adminCreateUserConfig"]["allowAdminCreateUserOnly"] is True
-    client = _one("aws:cognito/userPoolClient:UserPoolClient", "adlc-prod-alb-client")
-    assert client["callbackUrls"] == ["https://adlc-prod-alb-123.eu-central-1.elb.amazonaws.com/oauth2/idpresponse"]
-    assert client["generateSecret"] is True
+def test_nothing_but_the_alb_is_reachable_from_the_internet():
+    ingress = dict(_by_type("aws:vpc/securityGroupIngressRule:SecurityGroupIngressRule"))
+    open_to_world = sorted(n for n, i in ingress.items() if i.get("cidrIpv4") == "0.0.0.0/0")
+    assert open_to_world == ["adlc-prod-alb-in-443", "adlc-prod-alb-in-80"]
+    assert ingress["adlc-prod-task-in-alb"]["fromPort"] == 8080
+    assert ingress["adlc-prod-efs-in-task"]["fromPort"] == 2049
+    assert not any(i.get("fromPort") == 22 for i in ingress.values())  # no SSH anywhere
 
 
-def test_secrets_are_secure_strings_and_env_includes_embed_url():
-    params = {i["name"]: i for _, i in _by_type("aws:ssm/parameter:Parameter")}
-    assert params["/adlc/prod/env/OPENAI_API_KEY"]["type"] == "SecureString"
-    assert params["/adlc/prod/github_deploy_key"]["type"] == "SecureString"
-    assert _plain(params["/adlc/prod/env/EMBED_API_URL"]["value"]) == "http://10.40.0.25:8000"
-    # optional secrets that weren't configured create no parameter
-    assert "/adlc/prod/env/ANTHROPIC_API_KEY" not in params
+def test_efs_is_encrypted_backed_up_and_owned_by_the_container_user():
+    fs = _one("aws:efs/fileSystem:FileSystem", "adlc-prod-data-fs")
+    assert fs["encrypted"] is True
+    assert _one("aws:efs/backupPolicy:BackupPolicy", "adlc-prod-data-fs-backup")["backupPolicy"]["status"] == "ENABLED"
+    ap = _one("aws:efs/accessPoint:AccessPoint", "adlc-prod-data-ap")
+    assert ap["posixUser"] == {"uid": 1000, "gid": 1000}  # matches the Dockerfile's user
+    assert len(_by_type("aws:efs/mountTarget:MountTarget")) == 2
 
 
-def test_app_role_reads_only_this_stacks_parameters_and_cohere_embeddings():
-    policy = json.loads(_one("aws:iam/rolePolicy:RolePolicy", "adlc-prod-app-policy")["policy"])
-    ssm, bedrock = policy["Statement"]
-    assert all(r.startswith("arn:aws:ssm:*:*:parameter/adlc/prod") for r in ssm["Resource"])
+def test_task_role_only_gets_cohere_embeddings_its_efs_and_ecs_exec():
+    policy = json.loads(_one("aws:iam/rolePolicy:RolePolicy", "adlc-prod-task-policy")["policy"])
+    bedrock, efs, exec_ = policy["Statement"]
     assert bedrock["Action"] == "bedrock:InvokeModel"
-    assert all("cohere.embed-v4" in r for r in bedrock["Resource"])  # no other Bedrock models
+    assert all("cohere.embed-v4" in r for r in bedrock["Resource"])
+    assert efs["Resource"] == "arn:aws:mock:::adlc-prod-data-fs"
+    assert "elasticfilesystem:AccessPointArn" in efs["Condition"]["StringEquals"]
+    assert all(a.startswith("ssmmessages:") for a in exec_["Action"])
 
 
-def test_data_volume_is_encrypted_tagged_for_backup_and_snapshotted():
-    volume = _one("aws:ebs/volume:Volume", "adlc-prod-data")
-    assert volume["encrypted"] is True
-    assert volume["tags"]["Backup"] == "adlc-prod-daily"
-    dlm = _one("aws:dlm/lifecyclePolicy:LifecyclePolicy", "adlc-prod-data-snapshots")
-    assert dlm["policyDetails"]["targetTags"] == {"Backup": "adlc-prod-daily"}
+def test_execution_role_reads_only_this_stacks_secrets():
+    policy = json.loads(_one("aws:iam/rolePolicy:RolePolicy", "adlc-prod-task-exec-policy")["policy"])
+    (ssm,) = policy["Statement"]
+    assert ssm["Resource"] == ["arn:aws:ssm:*:*:parameter/adlc/prod/env/*"]
+    assert not _by_type("aws:secretsmanager/secret:Secret")  # no registry token to store
 
 
-def test_gpu_schedule_starts_and_stops_in_dubai_time():
-    schedules = dict(_by_type("aws:scheduler/schedule:Schedule"))
-    assert set(schedules) == {"adlc-prod-embed-start", "adlc-prod-embed-stop"}
-    for action, s in (("start", schedules["adlc-prod-embed-start"]), ("stop", schedules["adlc-prod-embed-stop"])):
-        assert s["scheduleExpressionTimezone"] == "Asia/Dubai"
-        assert s["target"]["arn"] == f"arn:aws:scheduler:::aws-sdk:ec2:{action}Instances"
+def test_ecr_repository_scans_images_and_expires_old_ones():
+    repo = _one("aws:ecr/repository:Repository", "adlc-prod-ecr")
+    assert repo["name"] == "adlc"
+    assert repo["imageScanningConfiguration"] == {"scanOnPush": True}
+    rules = json.loads(_one("aws:ecr/lifecyclePolicy:LifecyclePolicy", "adlc-prod-ecr-lifecycle")["policy"])["rules"]
+    assert {r["selection"]["tagStatus"] for r in rules} == {"untagged", "any"}
+
+
+def test_github_actions_role_trusts_only_this_repos_main_branch():
+    oidc = _one("aws:iam/openIdConnectProvider:OpenIdConnectProvider", "adlc-prod-github-oidc")
+    assert oidc["url"] == "https://token.actions.githubusercontent.com"
+    trust = json.loads(_one("aws:iam/role:Role", "adlc-prod-github-actions-role")["assumeRolePolicy"])
+    conditions = trust["Statement"][0]["Condition"]["StringEquals"]
+    assert conditions["token.actions.githubusercontent.com:sub"] == "repo:MennaSayedTKM/ADLC:ref:refs/heads/main"
+    assert conditions["token.actions.githubusercontent.com:aud"] == "sts.amazonaws.com"
+
+
+def test_github_actions_role_can_only_push_this_image_and_redeploy_this_cluster():
+    policy = json.loads(_one("aws:iam/rolePolicy:RolePolicy", "adlc-prod-github-actions-policy")["policy"])
+    token, push, deploy = policy["Statement"]
+    assert token["Action"] == "ecr:GetAuthorizationToken"  # account-wide by design; grants no repo access
+    assert push["Resource"] == "arn:aws:mock:::adlc-prod-ecr"
+    assert "ecr:DeleteRepository" not in push["Action"] and "ecr:BatchDeleteImage" not in push["Action"]
+    assert deploy["Action"] == ["ecs:UpdateService", "ecs:DescribeServices"]
+    assert deploy["Resource"] == "arn:aws:ecs:eu-central-1:*:service/adlc-prod/*"
+
+
+def test_work_hours_schedule_scales_between_zero_and_one_task():
+    target = _one("aws:appautoscaling/target:Target", "adlc-prod-app-scaling")
+    assert (target["minCapacity"], target["maxCapacity"]) == (0, 1)
+    actions = dict(_by_type("aws:appautoscaling/scheduledAction:ScheduledAction"))
+    assert actions["adlc-prod-app-start"]["scalableTargetAction"] == {"minCapacity": 1, "maxCapacity": 1}
+    assert actions["adlc-prod-app-stop"]["scalableTargetAction"] == {"minCapacity": 0, "maxCapacity": 0}
+    assert all(a["timezone"] == "Asia/Dubai" for a in actions.values())
+
+
+def test_legacy_ec2_can_reach_efs_for_the_data_copy_and_keeps_its_protected_volume():
+    ingress = dict(_by_type("aws:vpc/securityGroupIngressRule:SecurityGroupIngressRule"))
+    assert ingress["adlc-prod-efs-in-app"]["fromPort"] == 2049
+    assert _one("aws:ebs/volume:Volume", "adlc-prod-data")["encrypted"] is True
+    assert len(_by_type("aws:ec2/instance:Instance")) == 1
+    # the GPU embedding server is gone for good (Bedrock replaced it)
+    assert not any("embed" in n for t, n, _ in mocks.resources if t == "aws:ec2/instance:Instance")
