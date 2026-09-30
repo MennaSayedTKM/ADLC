@@ -32,8 +32,13 @@ mocks.install(
         "adlc:appScheduleEnabled": "true",
         "adlc:githubOwnerId": "295564551",
         "adlc:githubRepoId": "1385264226",
+        "adlc:domain": "adlc.tkmind.net",
+        "adlc:domainCertValidated": "true",
+        "adlc:entraTenantId": "11111111-2222-3333-4444-555555555555",
+        "adlc:entraClientId": "66666666-7777-8888-9999-000000000000",
+        "adlc:entraClientSecret": "entra-secret-not-real",
     },
-    mocks.SECRET_KEYS,
+    mocks.SECRET_KEYS + ["adlc:entraClientSecret"],
 )
 
 import adlc_stack  # noqa: E402  (must import after mocks are set)
@@ -104,6 +109,47 @@ def test_https_listener_logs_in_then_forwards_to_fargate():
     assert [a["type"] for a in actions] == ["authenticate-cognito", "forward"]
     assert actions[1]["targetGroupArn"] == "arn:aws:mock:::adlc-prod-fargate-tg"
     assert _one("aws:lb/listener:Listener", "adlc-prod-http")["defaultActions"][0]["type"] == "redirect"
+
+
+def test_custom_domain_serves_the_validated_acm_certificate():
+    cert = _one("aws:acm/certificate:Certificate", "adlc-prod-domain-cert")
+    assert (cert["domainName"], cert["validationMethod"]) == ("adlc.tkmind.net", "DNS")
+    listener = _one("aws:lb/listener:Listener", "adlc-prod-https")
+    assert listener["certificateArn"] == "arn:aws:mock:::adlc-prod-domain-cert"
+    # the ALB's own hostname still gets its (self-signed) certificate via SNI
+    extra = _one("aws:lb/listenerCertificate:ListenerCertificate", "adlc-prod-https-alb-hostname-cert")
+    assert extra["certificateArn"] == "arn:aws:mock:::adlc-prod-cert"
+    client = _one("aws:cognito/userPoolClient:UserPoolClient", "adlc-prod-alb-client")
+    assert client["callbackUrls"] == [
+        "https://adlc-prod-alb-123.eu-central-1.elb.amazonaws.com/oauth2/idpresponse",
+        "https://adlc.tkmind.net/oauth2/idpresponse",
+    ]
+
+
+def test_self_sign_up_is_on_but_gated_to_company_email():
+    pool = _one("aws:cognito/userPool:UserPool", "adlc-prod-users")
+    assert pool["adminCreateUserConfig"]["allowAdminCreateUserOnly"] is False
+    assert pool["autoVerifiedAttributes"] == ["email"]  # sign-up confirms by emailed code
+    assert pool["lambdaConfig"]["preSignUp"] == "arn:aws:mock:::adlc-prod-pre-signup"
+    fn = _one("aws:lambda/function:Function", "adlc-prod-pre-signup")
+    assert fn["environment"]["variables"] == {"ALLOWED_EMAIL_DOMAINS": "tkmind.net"}
+    assert fn["handler"] == "pre_signup.handler"
+    permission = _one("aws:lambda/permission:Permission", "adlc-prod-pre-signup-invoke")
+    assert permission["principal"] == "cognito-idp.amazonaws.com"
+    assert permission["sourceArn"] == "arn:aws:mock:::adlc-prod-users"  # only this user pool may invoke it
+
+
+def test_sign_in_with_microsoft_uses_the_tkmind_tenant():
+    idp = _one("aws:cognito/identityProvider:IdentityProvider", "adlc-prod-microsoft")
+    assert (idp["providerName"], idp["providerType"]) == ("Microsoft", "OIDC")
+    details = idp["providerDetails"]
+    # the map holds the client secret, so Pulumi marks the whole map secret
+    details = details.get("value", details)
+    assert details["client_secret"] == "entra-secret-not-real"
+    assert details["oidc_issuer"] == "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0"
+    assert idp["attributeMapping"]["email"] == "email"
+    client = _one("aws:cognito/userPoolClient:UserPoolClient", "adlc-prod-alb-client")
+    assert client["supportedIdentityProviders"] == ["COGNITO", "Microsoft"]
 
 
 def test_nothing_but_the_alb_is_reachable_from_the_internet():

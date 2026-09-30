@@ -21,5 +21,6 @@ config:
   adlc:ec2AppEnabled: "false"
   adlc:githubOwnerId: "295564551"
   adlc:githubRepoId: "1385264226"
+  adlc:domain: adlc.tkmind.net
 secretsprovider: awskms://alias/adlc-pulumi?region=eu-central-1&awssdk=v2&profile=adlc
 encryptedkey: AQICAHgQ95duvPtP+2bmxAmGES4Nb3ToM3vvlSgZi4T8w4zWsAEalpSGGP0JgZ8FA/XBqzlLAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMsPPtJRlq0kXP9GfbAgEQgDv1h4YeOTJogP25zdGBSXRMnW0nQRTX67w4f2M2fJ7tQ9jz6Wxk0hHdTAfJmAM/HjRj8Ud+2Bn3RdK9wA==

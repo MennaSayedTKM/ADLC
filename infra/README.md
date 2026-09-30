@@ -86,7 +86,9 @@ pulumi up
 | Container logs | `aws logs tail /ecs/adlc-prod --follow --profile adlc` |
 | Is it healthy? | `aws ecs describe-services --cluster adlc-prod --services adlc-prod-app --query "services[0].[runningCount,deployments[0].rolloutState]" --profile adlc` |
 | Shell inside the container | Install the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html), then `pulumi stack output shellCommand` |
-| Invite a user | `pulumi stack output addUserCommand`, replace `NAME@tkmind.net` (twice), run it |
+| New users | Self-service: **Sign up** on the login page with an `@tkmind.net` address and confirm the emailed code (from `no-reply@verificationemail.com`, which may land in Junk). Other domains are refused by the `adlc-prod-pre-signup` Lambda (`adlc:allowedEmailDomains`) |
+| Add a user by hand | `pulumi stack output addUserCommand`, replace `NAME@tkmind.net` (twice), run it |
+| Remove a user | `aws cognito-idp admin-delete-user --user-pool-id eu-central-1_14ALZjxTL --username NAME@tkmind.net --profile adlc` |
 | Rotate the OpenAI key | `pulumi config set --secret adlc:openaiApiKey`, `pulumi up`, then redeploy (above) |
 | Image vulnerability scan | ECR console → `adlc` → image → *Vulnerabilities* (scanned on every push) |
 | Container size | `adlc:taskCpu` / `adlc:taskMemory` in `Pulumi.prod.yaml` (default 1 vCPU / 4 GB), then `pulumi up` |
@@ -139,15 +141,53 @@ Then delete the 4 snapshots in the EC2 console (**Snapshots**, tag
 These are estimates. Bedrock embeddings (fractions of a cent per screen)
 and OpenAI usage are billed per use and tracked in the `ai_calls` table.
 
-## Moving to a real domain
+## Custom domain: adlc.tkmind.net
 
-When a domain such as `adlc.tkmind.net` is available:
-1. Request an ACM certificate for it in eu-central-1 (DNS validation).
-2. In `adlc_stack.py`, replace the self-signed `tls_*` / `certificate` block
-   with that certificate's ARN, and change the Cognito `callback_urls` to
-   `https://adlc.tkmind.net/oauth2/idpresponse`.
-3. Point the domain at the load balancer's DNS name with a CNAME record.
-4. Run `pulumi up`.
+The DNS for `tkmind.net` is hosted at **OVH**, not in AWS, so this happens in
+two phases.
+
+1. **Done:** `adlc:domain = adlc.tkmind.net`. The ACM certificate is requested
+   and the Cognito callback allows `https://adlc.tkmind.net`. The two records
+   to add at OVH are shown by:
+   ```powershell
+   pulumi stack output dnsRecords --json
+   ```
+   - the certificate-validation CNAME (keep it; ACM renews with it)
+   - `adlc` CNAME → the load balancer's DNS name
+
+   In OVH's form, *Sub-domain* is the part before `.tkmind.net`, and the
+   *Target* must end with a dot. ACM keeps an unvalidated request open for
+   72 hours; after that, re-request it (the validation record changes).
+2. **Pending the OVH records:** once the certificate is issued
+   (`aws acm describe-certificate --certificate-arn (pulumi stack output domainCertArn) --query Certificate.Status --profile adlc`
+   shows `ISSUED`):
+   ```powershell
+   pulumi config set adlc:domainCertValidated true
+   pulumi up
+   ```
+   The HTTPS listener then serves the real certificate for
+   `adlc.tkmind.net`. The load balancer's own hostname keeps working with
+   the self-signed one.
+
+## Sign in with Microsoft (prepared, not enabled)
+
+The stack can add a "Sign in with Microsoft" button for TKMiND's
+Microsoft 365 accounts. It needs an app registration in Microsoft Entra ID,
+made by an account with the right role in the Tkmind FZCO tenant:
+- single tenant
+- Web redirect URI = `pulumi stack output microsoftRedirectUri`
+- optional ID-token claim `email`
+- admin consent granted for `User.Read`
+- a client secret
+
+Then:
+```powershell
+pulumi config set adlc:entraTenantId <Directory (tenant) ID>
+pulumi config set adlc:entraClientId <Application (client) ID>
+pulumi config set --secret adlc:entraClientSecret
+pulumi up
+```
+Microsoft sign-ins go through the same `@tkmind.net` check.
 
 ## First-time setup (already done, for reference)
 

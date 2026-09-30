@@ -52,6 +52,23 @@ def _flag(key: str, default: bool) -> bool:
 vpc_cidr = cfg.get("vpcCidr") or "10.40.0.0/16"
 login_session_hours = cfg.get_int("loginSessionHours") or 12
 
+# Custom domain (DNS hosted outside AWS, at OVH). Two phases: set
+# adlc:domain → `pulumi up` requests the certificate and prints the DNS
+# records to add; once ACM has issued it, set adlc:domainCertValidated=true
+# → `pulumi up` switches the HTTPS listener to it.
+domain = cfg.get("domain")  # e.g. adlc.tkmind.net
+domain_cert_validated = cfg.get_bool("domainCertValidated") or False
+
+# Login: self sign-up and "Sign in with Microsoft", both limited to these
+# email domains by the pre sign-up Lambda (every signed-in user sees every
+# project — the app has no per-user permissions).
+self_signup_enabled = cfg.get_bool("selfSignUpEnabled")
+self_signup_enabled = True if self_signup_enabled is None else self_signup_enabled
+allowed_email_domains = cfg.get("allowedEmailDomains") or "tkmind.net"
+entra_tenant_id = cfg.get("entraTenantId")  # Microsoft Entra ID (Microsoft 365) tenant
+entra_client_id = cfg.get("entraClientId")
+entra_client_secret = cfg.get_secret("entraClientSecret")
+
 # Fargate
 serve_from = (cfg.get("serveFrom") or "fargate").strip().lower()
 if serve_from not in ("ec2", "fargate"):
@@ -471,13 +488,43 @@ certificate = aws.acm.Certificate(
     tags=_name("self-signed"),
 )
 
+# Pre sign-up trigger: refuses any email outside adlc:allowedEmailDomains,
+# for self sign-up, Microsoft sign-in and admin-created users alike.
+pre_signup_role = aws.iam.Role(
+    f"{prefix}-pre-signup-role", assume_role_policy=_assume_role("lambda.amazonaws.com"), tags=tags
+)
+aws.iam.RolePolicyAttachment(
+    f"{prefix}-pre-signup-logs-policy",
+    role=pre_signup_role.name,
+    policy_arn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+)
+pre_signup_logs = aws.cloudwatch.LogGroup(
+    f"{prefix}-pre-signup-logs", name=f"/aws/lambda/{prefix}-pre-signup", retention_in_days=log_retention_days, tags=tags
+)
+pre_signup_fn = aws.lambda_.Function(
+    f"{prefix}-pre-signup",
+    name=f"{prefix}-pre-signup",
+    runtime="python3.12",
+    architectures=["arm64"],
+    handler="pre_signup.handler",
+    code=pulumi.AssetArchive({"pre_signup.py": pulumi.FileAsset(str(_ROOT / "lambdas" / "pre_signup.py"))}),
+    role=pre_signup_role.arn,
+    timeout=5,
+    memory_size=128,
+    environment=aws.lambda_.FunctionEnvironmentArgs(variables={"ALLOWED_EMAIL_DOMAINS": allowed_email_domains}),
+    tags=tags,
+    opts=pulumi.ResourceOptions(depends_on=[pre_signup_logs]),
+)
+
 user_pool = aws.cognito.UserPool(
     f"{prefix}-users",
     name=f"{prefix}-users",
     username_attributes=["email"],
-    auto_verified_attributes=["email"],
-    # Only an admin can add people — no public sign-up.
-    admin_create_user_config=aws.cognito.UserPoolAdminCreateUserConfigArgs(allow_admin_create_user_only=True),
+    auto_verified_attributes=["email"],  # self sign-up confirms with an emailed code
+    admin_create_user_config=aws.cognito.UserPoolAdminCreateUserConfigArgs(
+        allow_admin_create_user_only=not self_signup_enabled
+    ),
+    lambda_config=aws.cognito.UserPoolLambdaConfigArgs(pre_sign_up=pre_signup_fn.arn),
     account_recovery_setting=aws.cognito.UserPoolAccountRecoverySettingArgs(
         recovery_mechanisms=[aws.cognito.UserPoolAccountRecoverySettingRecoveryMechanismArgs(name="verified_email", priority=1)]
     ),
@@ -492,12 +539,46 @@ user_pool = aws.cognito.UserPool(
     deletion_protection="ACTIVE",
     tags=tags,
 )
+aws.lambda_.Permission(
+    f"{prefix}-pre-signup-invoke",
+    action="lambda:InvokeFunction",
+    function=pre_signup_fn.name,
+    principal="cognito-idp.amazonaws.com",
+    source_arn=user_pool.arn,
+)
 domain_suffix = random.RandomString(f"{prefix}-login-suffix", length=6, special=False, upper=False)
 user_pool_domain = aws.cognito.UserPoolDomain(
     f"{prefix}-login",
     domain=domain_suffix.result.apply(lambda s: f"{prefix}-{s}"),
     user_pool_id=user_pool.id,
 )
+
+# "Sign in with Microsoft" — TKMiND's Microsoft 365 (Entra ID) accounts,
+# once the app registration's tenant/client ID and secret are configured.
+identity_providers = ["COGNITO"]
+client_dependencies = []
+if entra_tenant_id and entra_client_id and entra_client_secret is not None:
+    microsoft_idp = aws.cognito.IdentityProvider(
+        f"{prefix}-microsoft",
+        user_pool_id=user_pool.id,
+        provider_name="Microsoft",
+        provider_type="OIDC",
+        provider_details={
+            "client_id": entra_client_id,
+            "client_secret": entra_client_secret,
+            "oidc_issuer": f"https://login.microsoftonline.com/{entra_tenant_id}/v2.0",
+            "authorize_scopes": "openid email profile",
+            "attributes_request_method": "GET",
+        },
+        attribute_mapping={"email": "email", "name": "name", "username": "sub"},
+    )
+    identity_providers.append("Microsoft")
+    client_dependencies.append(microsoft_idp)
+
+callback_urls = [alb.dns_name.apply(lambda dns: f"https://{dns}/oauth2/idpresponse")]
+if domain:
+    callback_urls.append(f"https://{domain}/oauth2/idpresponse")
+
 user_pool_client = aws.cognito.UserPoolClient(
     f"{prefix}-alb-client",
     name=f"{prefix}-alb",
@@ -506,9 +587,22 @@ user_pool_client = aws.cognito.UserPoolClient(
     allowed_oauth_flows_user_pool_client=True,
     allowed_oauth_flows=["code"],
     allowed_oauth_scopes=["openid", "email"],
-    supported_identity_providers=["COGNITO"],
-    callback_urls=[alb.dns_name.apply(lambda dns: f"https://{dns}/oauth2/idpresponse")],
+    supported_identity_providers=identity_providers,
+    callback_urls=callback_urls,
+    opts=pulumi.ResourceOptions(depends_on=client_dependencies),
 )
+
+# Custom domain certificate (ACM, DNS-validated through records added at OVH).
+domain_cert = None
+serving_cert_arn = certificate.arn
+if domain:
+    domain_cert = aws.acm.Certificate(
+        f"{prefix}-domain-cert", domain_name=domain, validation_method="DNS", tags=_name("domain")
+    )
+    if domain_cert_validated:
+        serving_cert_arn = aws.acm.CertificateValidation(
+            f"{prefix}-domain-cert-validation", certificate_arn=domain_cert.arn
+        ).certificate_arn
 
 fargate_tg = aws.lb.TargetGroup(
     f"{prefix}-fargate-tg",
@@ -558,7 +652,7 @@ https_listener = aws.lb.Listener(
     port=443,
     protocol="HTTPS",
     ssl_policy="ELBSecurityPolicy-TLS13-1-2-2021-06",
-    certificate_arn=certificate.arn,
+    certificate_arn=serving_cert_arn,
     default_actions=[
         aws.lb.ListenerDefaultActionArgs(
             type="authenticate-cognito",
@@ -575,6 +669,13 @@ https_listener = aws.lb.Listener(
         aws.lb.ListenerDefaultActionArgs(type="forward", order=2, target_group_arn=serving_tg.arn),
     ],
 )
+if domain and domain_cert_validated:
+    # The ALB's own hostname keeps working (with its self-signed warning):
+    # the listener picks the certificate by SNI.
+    aws.lb.ListenerCertificate(
+        f"{prefix}-https-alb-hostname-cert", listener_arn=https_listener.arn, certificate_arn=certificate.arn
+    )
+
 aws.lb.Listener(
     f"{prefix}-http",
     load_balancer_arn=alb.arn,
@@ -702,7 +803,40 @@ if serve_from == "fargate":
 
 # ── Outputs ──────────────────────────────────────────────────────────────────
 profile = pulumi.Config("aws").get("profile") or "adlc"
-pulumi.export("url", alb.dns_name.apply(lambda dns: f"https://{dns}"))
+pulumi.export(
+    "url", f"https://{domain}" if domain and domain_cert_validated else alb.dns_name.apply(lambda dns: f"https://{dns}")
+)
+pulumi.export("albUrl", alb.dns_name.apply(lambda dns: f"https://{dns}"))
+pulumi.export("loginDomain", user_pool_domain.domain.apply(lambda d: f"{d}.auth.{region}.amazoncognito.com"))
+pulumi.export(
+    "microsoftRedirectUri",  # the Redirect URI for the Entra ID app registration
+    user_pool_domain.domain.apply(lambda d: f"https://{d}.auth.{region}.amazoncognito.com/oauth2/idpresponse"),
+)
+if domain_cert is not None:
+
+    def _field(option, snake: str):
+        """Typed output object in a real run, plain camelCase dict under mocks."""
+        if isinstance(option, dict):
+            camel = snake.split("_")[0] + "".join(w.title() for w in snake.split("_")[1:])
+            return option.get(snake, option.get(camel))
+        return getattr(option, snake)
+
+    # The two CNAME records to add at the DNS host (OVH) for adlc:domain.
+    pulumi.export(
+        "dnsRecords",
+        pulumi.Output.all(domain_cert.domain_validation_options, alb.dns_name).apply(
+            lambda args: [
+                {
+                    "purpose": "certificate validation (keep it — ACM renews with it)",
+                    "type": _field(args[0][0], "resource_record_type"),
+                    "name": _field(args[0][0], "resource_record_name"),
+                    "value": _field(args[0][0], "resource_record_value"),
+                },
+                {"purpose": "site address", "type": "CNAME", "name": f"{domain}.", "value": f"{args[1]}."},
+            ]
+        ),
+    )
+    pulumi.export("domainCertArn", domain_cert.arn)
 pulumi.export("serveFrom", serve_from)
 pulumi.export("cognitoUserPoolId", user_pool.id)
 pulumi.export(

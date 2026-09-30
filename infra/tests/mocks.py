@@ -29,6 +29,19 @@ class AdlcMocks(pulumi.runtime.Mocks):
             state.setdefault("name", args.name)
         if args.typ in ("aws:ecs/cluster:Cluster", "aws:ecs/service:Service"):
             state.setdefault("name", args.name)
+        if args.typ == "aws:acm/certificate:Certificate" and args.inputs.get("domainName"):
+            state["domainValidationOptions"] = [
+                {
+                    "domainName": args.inputs["domainName"],
+                    "resourceRecordName": f"_abc123.{args.inputs['domainName']}.",
+                    "resourceRecordType": "CNAME",
+                    "resourceRecordValue": "_def456.xyz.acm-validations.aws.",
+                }
+            ]
+        if args.typ == "aws:acm/certificateValidation:CertificateValidation":
+            state["certificateArn"] = args.inputs["certificateArn"]
+        if args.typ == "aws:cognito/userPoolDomain:UserPoolDomain":
+            state.setdefault("domain", args.inputs.get("domain"))
         if args.typ == "aws:ecr/repository:Repository":
             state["repositoryUrl"] = f"111111111111.dkr.ecr.eu-central-1.amazonaws.com/{args.inputs['name']}"
         state.setdefault("arn", f"arn:aws:mock:::{args.name}")

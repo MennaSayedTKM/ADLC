@@ -66,6 +66,24 @@ def test_image_can_be_pinned_to_a_specific_build():
     assert image == "111111111111.dkr.ecr.eu-central-1.amazonaws.com/adlc:3f2a1bc"
 
 
+def test_domain_requested_but_not_yet_validated_keeps_serving_the_old_certificate():
+    res = _resources({"adlc:serveFrom": "fargate", "adlc:domain": "adlc.tkmind.net"})
+    assert _names(res, "aws:acm/certificate:Certificate") == {"adlc-prod-cert", "adlc-prod-domain-cert"}
+    assert not _names(res, "aws:acm/certificateValidation:CertificateValidation")
+    https = next(r for r in res if r["name"] == "adlc-prod-https")
+    assert https["inputs"]["certificateArn"] == "arn:aws:mock:::adlc-prod-cert"
+    # no Microsoft sign-in until the Entra app registration is configured
+    assert not _names(res, "aws:cognito/identityProvider:IdentityProvider")
+    client = next(r for r in res if r["name"] == "adlc-prod-alb-client")
+    assert client["inputs"]["supportedIdentityProviders"] == ["COGNITO"]
+
+
+def test_self_sign_up_can_be_switched_off():
+    res = _resources({"adlc:serveFrom": "fargate", "adlc:selfSignUpEnabled": "false"})
+    pool = next(r for r in res if r["name"] == "adlc-prod-users")
+    assert pool["inputs"]["adminCreateUserConfig"]["allowAdminCreateUserOnly"] is True
+
+
 def test_misconfigurations_are_refused():
     no_server = _run({"adlc:serveFrom": "ec2", "adlc:ec2AppEnabled": "false"})
     assert no_server.returncode == 3 and "nothing would serve traffic" in no_server.stderr
