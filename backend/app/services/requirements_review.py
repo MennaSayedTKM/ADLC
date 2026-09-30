@@ -67,6 +67,12 @@ def fork_new_version(session: Session, document: Document) -> Document:
     session.add(new_doc)
     session.flush()
 
+    # UI/UX prompts generated from the superseded version no longer reflect
+    # the stories in force — flag them rather than deleting the PM's work.
+    from .ux_prompts import mark_prompts_stale
+
+    mark_prompts_stale(session, document.id)
+
     old_items = (
         session.query(RequirementItem)
         .filter(RequirementItem.document_id == document.id)

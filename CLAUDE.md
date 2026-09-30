@@ -12,8 +12,13 @@ build brief (historical — some details changed during the build).
 - `backend/migrations/` — Alembic; `backend/tests/` — pytest suite + demo seed scripts
 - `ai/ingest/` — PixelRAG render → tile → embed → FAISS (`ingest_file`) and FAISS + MMR search
 - `ai/text/` — PDF text-layer / DOCX extraction and the requirements extractor
+- `ai/text/ux_prompt_generator.py` — Figma Make prompt generation (modes: foundation,
+  new_feature, edit_existing); service in `backend/app/services/ux_prompts.py`, only from
+  *approved* requirement versions. Prompts live in `ux_prompts`; the PM's style brief and
+  saved design-token summary live in `projects.style_brief`.
 - `ai/vision/` — GPT-4o vision: design alignment checker, intake image transcription,
-  rerank/answer synthesis (kept for future Q&A)
+  screenshot description for edit prompts (`describe_screen.py`), rerank/answer synthesis
+  (kept for future Q&A)
 - `ai/bedrock_embed_client.py` — **default** embedding client: Cohere Embed v4 on Amazon
   Bedrock (`embed_provider: bedrock` in `config.yaml`). Same interface as `EmbedClient`.
 - `ai/embed_client.py` — `EmbedClient` for the self-hosted Qwen3-VL server (retry +

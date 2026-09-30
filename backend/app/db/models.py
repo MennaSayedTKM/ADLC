@@ -44,6 +44,13 @@ class Project(Base):
     # with SQLAlchemy's own reserved Base.metadata attribute.
     confluence_metadata = Column(JSON, nullable=True)
 
+    # {"reference_brand", "primary_color", "tone", "appearance", "platform",
+    # "brand_notes", "design_tokens_summary"} — the PM's saved visual brief for
+    # UI/UX prompt generation, plus the compact design-token summary a
+    # Foundation prompt produced, so later new-feature / edit prompts extend
+    # the same design system instead of inventing a new one.
+    style_brief = Column(JSON, nullable=True)
+
 
 class Document(Base):
     """
@@ -250,8 +257,39 @@ class AiCall(Base):
             "call_type in ('extraction','alignment','rerank','crop','synthesis',"
             "'suggestions','item_draft','intake_transcription','clarifying_questions',"
             "'policy_coverage','source_material_review','output_story_review',"
-            "'artifact_quality_review','embedding')",
+            "'artifact_quality_review','embedding','ux_prompt')",
             name="ck_ai_calls_call_type",
+        ),
+    )
+
+
+class UxPrompt(Base):
+    """
+    A generated Figma Make prompt for one epic of an approved requirements
+    version — see services/ux_prompts.py. Advisory only: nothing is sent to
+    Figma; the PM copies the text. prompt_text is the model's original output
+    and is never overwritten; PM edits go to edited_text so "reset to
+    generated" is always possible. is_stale is set when the source version is
+    superseded by a newer one (see requirements_review.fork_new_version).
+    """
+
+    __tablename__ = "ux_prompts"
+
+    id = Column(String, primary_key=True, default=new_uuid)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False)
+    epic_item_id = Column(String, ForeignKey("requirement_items.id"), nullable=False)
+    story_ids = Column(JSON, nullable=False)  # list[requirement_items.id] selected for this prompt
+    mode = Column(String, nullable=False)
+    style_brief = Column(JSON, nullable=True)  # snapshot of the brief (and screenshot description) used
+    prompt_text = Column(Text, nullable=False)
+    edited_text = Column(Text, nullable=True)
+    is_stale = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        CheckConstraint(
+            "mode in ('foundation','new_feature','edit_existing')", name="ck_ux_prompts_mode"
         ),
     )
 

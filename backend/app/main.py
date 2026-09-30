@@ -17,7 +17,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 load_dotenv(_REPO_ROOT / ".env")
 
-from .routers import designs, intake, policies, projects, requirements  # noqa: E402
+from .routers import designs, intake, policies, projects, requirements, ux_prompts  # noqa: E402
 
 app = FastAPI(
     title="TKMiND Platform API",
@@ -31,6 +31,7 @@ app.include_router(intake.router)
 app.include_router(intake.questions_router)
 app.include_router(policies.router)
 app.include_router(designs.router)
+app.include_router(ux_prompts.router)
 
 
 @app.get("/health", summary="Liveness check")

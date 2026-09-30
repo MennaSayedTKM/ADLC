@@ -62,6 +62,20 @@ intake_image_model: gpt-4o
 intake_image_detail: high
 intake_image_max_tokens: 2000
 
+# ── UI/UX prompt generation (Figma Make prompts from approved stories) ──────
+# One text call per prompt (structured tool output). Kept moderate on purpose:
+# the goal is a dense, complete brief that doesn't burn the PM's Figma credits.
+ux_prompt_model: gpt-4o
+ux_prompt_max_tokens: 6000
+# Soft ceiling shown to the PM as a length/credit indicator, in characters.
+# Advisory only — nothing is truncated.
+ux_prompt_soft_char_limit: 9000
+# Optional screenshot of the existing screen for "edit existing" prompts,
+# described once via GPT-4o vision and folded into that one generation.
+ux_screenshot_model: gpt-4o
+ux_screenshot_detail: high
+ux_screenshot_max_tokens: 1500
+
 # ── GPT-4o cost estimation (for ai_calls logging) ────────────────────────────
 # USD per 1,000,000 tokens. Update when OpenAI changes pricing.
 gpt4o_input_cost_per_million: 2.50

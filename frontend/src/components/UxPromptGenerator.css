@@ -1,0 +1,201 @@
+.ux-gen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.ux-gen__step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ux-gen__step-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.9375rem;
+}
+
+.ux-gen__step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.ux-gen__step-aside {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+}
+
+.ux-gen__muted {
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+}
+
+.ux-gen__epics,
+.ux-gen__stories {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ux-gen__epic,
+.ux-gen__story,
+.ux-gen__mode {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.ux-gen__epic:hover,
+.ux-gen__story:hover,
+.ux-gen__mode:hover {
+  border-color: var(--color-border-strong);
+}
+
+.ux-gen__epic--active,
+.ux-gen__mode--active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.ux-gen__epic:has(:focus-visible),
+.ux-gen__story:has(:focus-visible),
+.ux-gen__mode:has(:focus-visible) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.ux-gen__epic-id {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+}
+
+.ux-gen__epic-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.ux-gen__modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.ux-gen__mode {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.ux-gen__mode input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ux-gen__mode {
+  position: relative;
+}
+
+.ux-gen__mode-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.ux-gen__mode-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+.ux-gen__summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.ux-gen__summary::-webkit-details-marker {
+  display: none;
+}
+
+.ux-gen__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.ux-gen__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ux-gen__field--wide {
+  grid-column: 1 / -1;
+}
+
+.ux-gen__label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.ux-gen__optional {
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+}
+
+.ux-gen__field input:not([type='file']),
+.ux-gen__field select,
+.ux-gen__field textarea {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  font-size: 0.875rem;
+}
+
+.ux-gen__field textarea {
+  resize: vertical;
+}
+
+.ux-gen__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+@media (max-width: 640px) {
+  .ux-gen__modes,
+  .ux-gen__grid {
+    grid-template-columns: 1fr;
+  }
+}

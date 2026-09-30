@@ -3,7 +3,7 @@ import type { Project } from '../api/types'
 import { Button } from './ui/Button'
 import './ProjectBar.css'
 
-export type Module = 'requirements' | 'design' | 'policies'
+export type Module = 'requirements' | 'uxprompts' | 'design' | 'policies'
 
 interface ProjectBarProps {
   projects: Project[]
@@ -56,6 +56,13 @@ export function ProjectBar({
             onClick={() => onModuleChange('requirements')}
           >
             Requirements
+          </button>
+          <button
+            type="button"
+            className={`project-bar__tab ${activeModule === 'uxprompts' ? 'project-bar__tab--active' : ''}`}
+            onClick={() => onModuleChange('uxprompts')}
+          >
+            UI/UX Prompts
           </button>
           <button
             type="button"

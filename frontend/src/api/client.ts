@@ -21,7 +21,11 @@ import type {
   Scenario,
   StandingPolicy,
   StoryDraft,
+  StyleBrief,
   TextIngestResponse,
+  UxPrompt,
+  UxPromptMode,
+  UxPromptSources,
 } from './types'
 
 const BASE = '/api'
@@ -271,4 +275,49 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ subject, previous_draft: previousDraft }),
     }),
+
+  getUxPromptSources: (projectId: string) =>
+    request<UxPromptSources>(`/projects/${projectId}/ux-prompts/sources`),
+
+  listUxPrompts: (projectId: string) => request<UxPrompt[]>(`/projects/${projectId}/ux-prompts`),
+
+  saveStyleBrief: (projectId: string, body: StyleBrief) =>
+    request<StyleBrief>(`/projects/${projectId}/ux-prompts/style-brief`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  generateUxPrompt: (
+    projectId: string,
+    body: {
+      documentId: string
+      epicId: string
+      storyIds: string[]
+      mode: UxPromptMode
+      styleBrief: StyleBrief
+      screenshot?: File | null
+    },
+  ) => {
+    const form = new FormData()
+    form.append('document_id', body.documentId)
+    form.append('epic_id', body.epicId)
+    form.append('story_ids', JSON.stringify(body.storyIds))
+    form.append('mode', body.mode)
+    form.append('style_brief', JSON.stringify(body.styleBrief))
+    if (body.screenshot) form.append('screenshot', body.screenshot)
+    return request<UxPrompt>(`/projects/${projectId}/ux-prompts`, { method: 'POST', body: form })
+  },
+
+  regenerateUxPrompt: (projectId: string, promptId: string) =>
+    request<UxPrompt>(`/projects/${projectId}/ux-prompts/${promptId}/regenerate`, { method: 'POST' }),
+
+  // editedText null resets to the generated text
+  updateUxPrompt: (projectId: string, promptId: string, editedText: string | null) =>
+    request<UxPrompt>(`/projects/${projectId}/ux-prompts/${promptId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ edited_text: editedText }),
+    }),
+
+  deleteUxPrompt: (projectId: string, promptId: string) =>
+    request<void>(`/projects/${projectId}/ux-prompts/${promptId}`, { method: 'DELETE' }),
 }

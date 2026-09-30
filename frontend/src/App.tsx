@@ -8,6 +8,7 @@ import { Banner } from './components/ui/Banner'
 import { DesignReviewPage } from './pages/DesignReviewPage'
 import { RequirementsReviewPage } from './pages/RequirementsReviewPage'
 import { StandingPoliciesPage } from './pages/StandingPoliciesPage'
+import { UxPromptsPage } from './pages/UxPromptsPage'
 
 const LAST_PROJECT_KEY = 'tkmind:lastProjectId'
 
@@ -70,6 +71,9 @@ function App() {
 
         {!error && selectedProjectId && activeModule === 'requirements' && (
           <RequirementsReviewPage projectId={selectedProjectId} />
+        )}
+        {!error && selectedProjectId && activeModule === 'uxprompts' && (
+          <UxPromptsPage projectId={selectedProjectId} />
         )}
         {!error && selectedProjectId && activeModule === 'design' && (
           <DesignReviewPage projectId={selectedProjectId} />

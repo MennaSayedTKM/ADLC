@@ -147,10 +147,20 @@ npm run dev --prefix frontend
    questions, edit or add items, run an evaluation, then **Approve**.
    Approval locks the version; further edits create a new version. Change
    requests can be uploaded against an approved version.
-3. **Design review** — upload screen exports against the approved version.
+3. **UI/UX prompts** — on an *approved* version, pick an epic, choose which of
+   its stories to include, and choose a mode: **New platform** (design system,
+   app shell, first flows), **New feature** (reuses the saved design system) or
+   **Edit existing** (targeted change; optionally attach a screenshot of the
+   current screen). An optional style brief (reference brand such as Apple,
+   primary color, tone, light/dark, platform) is saved per project. The result
+   is a Figma Make prompt you can edit, copy, regenerate or delete; screens
+   and states are labelled with story ids so developers can trace designs back
+   to requirements. Prompts are marked *Outdated* when a newer requirements
+   version supersedes theirs. Nothing is sent to Figma.
+4. **Design review** — upload screen exports against the approved version.
    Each screen gets an alignment report; click a screen to see it next to its
    findings and mark each one resolved or dismissed.
-4. **Share** the approved version. **Export PDF** and **Publish to
+5. **Share** the approved version. **Export PDF** and **Publish to
    Confluence** produce a business requirements document for stakeholders
    (scope, numbered business requirements, assumptions and dependencies,
    open issues, version history, sign-off). **Delivery PDF** gives the

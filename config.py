@@ -59,6 +59,14 @@ INTAKE_IMAGE_MODEL = str(_require("intake_image_model"))
 INTAKE_IMAGE_DETAIL = str(_require("intake_image_detail"))
 INTAKE_IMAGE_MAX_TOKENS = int(_require("intake_image_max_tokens"))
 
+# UI/UX prompt generation
+UX_PROMPT_MODEL = str(_require("ux_prompt_model"))
+UX_PROMPT_MAX_TOKENS = int(_require("ux_prompt_max_tokens"))
+UX_PROMPT_SOFT_CHAR_LIMIT = int(_require("ux_prompt_soft_char_limit"))
+UX_SCREENSHOT_MODEL = str(_require("ux_screenshot_model"))
+UX_SCREENSHOT_DETAIL = str(_require("ux_screenshot_detail"))
+UX_SCREENSHOT_MAX_TOKENS = int(_require("ux_screenshot_max_tokens"))
+
 # GPT-4o cost estimation
 GPT4O_INPUT_COST_PER_MILLION = float(_require("gpt4o_input_cost_per_million"))
 GPT4O_OUTPUT_COST_PER_MILLION = float(_require("gpt4o_output_cost_per_million"))

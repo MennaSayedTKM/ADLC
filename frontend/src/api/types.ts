@@ -275,3 +275,49 @@ export interface PolicyDraft {
   title: string
   policy_text: string
 }
+
+// ── UI/UX prompts (Figma Make) — mirrors backend/app/schemas/ux_prompts.py ──
+export type UxPromptMode = 'foundation' | 'new_feature' | 'edit_existing'
+
+export interface StyleBrief {
+  reference_brand?: string | null
+  primary_color?: string | null
+  tone?: string | null
+  appearance?: 'light' | 'dark' | 'both' | null
+  platform?: 'web' | 'mobile' | 'both' | null
+  brand_notes?: string | null
+  design_tokens_summary?: string | null
+}
+
+export interface EpicWithStories {
+  epic: RequirementItem
+  stories: RequirementItem[]
+}
+
+export interface UxPromptSources {
+  document: Document | null // latest APPROVED requirements version; null until one is approved
+  epics: EpicWithStories[]
+  suggested_mode: UxPromptMode
+  has_design_system: boolean
+  style_brief: StyleBrief
+  soft_char_limit: number
+}
+
+export interface UxPrompt {
+  id: string
+  document_id: string
+  epic_item_id: string
+  epic_external_id: string
+  epic_title: string
+  story_ids: string[]
+  story_external_ids: string[]
+  mode: UxPromptMode
+  style_brief: Record<string, unknown> | null
+  prompt_text: string
+  edited_text: string | null
+  is_stale: boolean
+  char_count: number
+  soft_char_limit: number
+  created_at: string
+  updated_at: string
+}
