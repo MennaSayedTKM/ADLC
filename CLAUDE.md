@@ -12,10 +12,16 @@ build brief (historical — some details changed during the build).
 - `backend/migrations/` — Alembic; `backend/tests/` — pytest suite + demo seed scripts
 - `ai/ingest/` — PixelRAG render → tile → embed → FAISS (`ingest_file`) and FAISS + MMR search
 - `ai/text/` — PDF text-layer / DOCX extraction and the requirements extractor
-- `ai/text/ux_prompt_generator.py` — Figma Make prompt generation (modes: foundation,
-  new_feature, edit_existing); service in `backend/app/services/ux_prompts.py`, only from
-  *approved* requirement versions. Prompts live in `ux_prompts`; the PM's style brief and
-  saved design-token summary live in `projects.style_brief`.
+- `ai/text/ux_prompt_generator.py` — Figma Make prompt generation, "Lego" style: one **Platform
+  Blueprint** per project (mode `foundation`, no epic: vision, design system, app shell, a
+  nav placeholder per epic) and one prompt per epic (`new_feature` / `edit_existing`). Service:
+  `backend/app/services/ux_prompts.py`; only from *approved* requirement versions. Consistency
+  comes from a context pack (tokens, sitemap, screen registry derived from saved prompts,
+  components, feature relationship map) built per feature prompt. Prompts live in `ux_prompts`;
+  the PM's brief and the blueprint's outputs live in `projects.style_brief`.
+- `backend/app/services/style_reference.py` — reads a reference website's HTML/CSS (BeautifulSoup)
+  into style tags. It fetches a user-supplied URL, so SSRF guards are mandatory (public IPs only,
+  80/443 only, per-redirect checks, size/time caps) — keep them and their tests if you touch it.
 - `ai/vision/` — GPT-4o vision: design alignment checker, intake image transcription,
   screenshot description for edit prompts (`describe_screen.py`), rerank/answer synthesis
   (kept for future Q&A)
@@ -72,7 +78,8 @@ build brief (historical — some details changed during the build).
 
 ## Scope constraints (deliberate — flag anything that would break them)
 
-- No live connectors to Jira, GitHub, Slack or the Figma API; inputs are uploads.
+- No live connectors to Jira, GitHub, Slack or the Figma API; inputs are uploads. The one
+  outbound read is the PM-triggered, read-only fetch of a reference website's public HTML/CSS.
 - No automatic writes to external systems. Every AI output is advisory, and anything
   outbound (e.g. Confluence publish) needs an explicit user action.
 - No single numeric alignment score. Findings are categorical (`aligned` / `partial` /

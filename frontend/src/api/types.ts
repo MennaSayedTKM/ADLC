@@ -279,14 +279,80 @@ export interface PolicyDraft {
 // ── UI/UX prompts (Figma Make) — mirrors backend/app/schemas/ux_prompts.py ──
 export type UxPromptMode = 'foundation' | 'new_feature' | 'edit_existing'
 
+export interface PaletteColor {
+  hex: string
+  count: number
+  kind: 'neutral' | 'accent'
+}
+
+// What was read from a reference website. Every field is editable by the PM
+// before it is saved, so this stays loosely typed on the server.
+export interface StyleTags {
+  palette?: PaletteColor[]
+  accent_guess?: string | null
+  background_guess?: string | null
+  text_guess?: string | null
+  fonts?: string[]
+  google_fonts?: string[]
+  font_sizes_px?: number[]
+  radii?: string[]
+  shadows?: string[]
+  css_variables?: Record<string, string>
+}
+
+export interface ReferenceStyle {
+  url: string
+  title?: string | null
+  note?: string | null // what to take from this site, e.g. "overall feel"
+  theme_color?: string | null
+  style_tags: StyleTags
+  stylesheets_read?: number
+  notes?: string[]
+  fetched_at?: string | null
+}
+
+export interface SitemapItem {
+  epic_external_id: string
+  label: string
+  route: string
+  status: 'placeholder' | 'designed'
+}
+
+export interface FeatureRelation {
+  epic_external_id: string
+  depends_on: string[]
+  integrates: { with_epic: string; how: string }[]
+}
+
+export interface RegistryScreen {
+  name: string
+  route: string
+  purpose: string
+  owner: string // "Platform" or an epic external id
+}
+
+export interface PromptScreen {
+  name: string
+  route: string
+  purpose: string
+}
+
+// The project's saved platform brief. The first block is edited by the PM; the
+// second is written by blueprint generation and is read-only here.
 export interface StyleBrief {
+  vision?: string | null
+  target_users?: string | null
   reference_brand?: string | null
   primary_color?: string | null
   tone?: string | null
   appearance?: 'light' | 'dark' | 'both' | null
   platform?: 'web' | 'mobile' | 'both' | null
   brand_notes?: string | null
+  reference_styles?: ReferenceStyle[] | null
   design_tokens_summary?: string | null
+  sitemap?: SitemapItem[]
+  component_names?: string[]
+  feature_map?: FeatureRelation[]
 }
 
 export interface EpicWithStories {
@@ -298,7 +364,14 @@ export interface UxPromptSources {
   document: Document | null // latest APPROVED requirements version; null until one is approved
   epics: EpicWithStories[]
   suggested_mode: UxPromptMode
+  has_blueprint: boolean
+  blueprint_prompt_id: string | null
+  epics_missing_from_blueprint: string[]
   has_design_system: boolean
+  feature_map: FeatureRelation[]
+  suggested_order: string[] // epic external ids, dependencies first
+  sitemap: SitemapItem[]
+  registry: RegistryScreen[]
   style_brief: StyleBrief
   soft_char_limit: number
 }
@@ -306,13 +379,14 @@ export interface UxPromptSources {
 export interface UxPrompt {
   id: string
   document_id: string
-  epic_item_id: string
-  epic_external_id: string
-  epic_title: string
+  epic_item_id: string | null // null for the platform blueprint
+  epic_external_id: string | null
+  epic_title: string | null
   story_ids: string[]
   story_external_ids: string[]
   mode: UxPromptMode
   style_brief: Record<string, unknown> | null
+  screens: PromptScreen[]
   prompt_text: string
   edited_text: string | null
   is_stale: boolean

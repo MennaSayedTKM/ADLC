@@ -21,6 +21,7 @@ import type {
   Scenario,
   StandingPolicy,
   StoryDraft,
+  ReferenceStyle,
   StyleBrief,
   TextIngestResponse,
   UxPrompt,
@@ -287,23 +288,35 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  extractStyleReference: (projectId: string, url: string) =>
+    request<ReferenceStyle>(`/projects/${projectId}/ux-prompts/style-references/extract`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+
+  draftVision: (projectId: string) =>
+    request<{ vision: string; target_users: string }>(`/projects/${projectId}/ux-prompts/vision/draft`, {
+      method: 'POST',
+    }),
+
+  // mode 'foundation' is the platform blueprint: no epic or stories.
   generateUxPrompt: (
     projectId: string,
     body: {
       documentId: string
-      epicId: string
-      storyIds: string[]
       mode: UxPromptMode
       styleBrief: StyleBrief
+      epicId?: string
+      storyIds?: string[]
       screenshot?: File | null
     },
   ) => {
     const form = new FormData()
     form.append('document_id', body.documentId)
-    form.append('epic_id', body.epicId)
-    form.append('story_ids', JSON.stringify(body.storyIds))
     form.append('mode', body.mode)
     form.append('style_brief', JSON.stringify(body.styleBrief))
+    if (body.epicId) form.append('epic_id', body.epicId)
+    form.append('story_ids', JSON.stringify(body.storyIds ?? []))
     if (body.screenshot) form.append('screenshot', body.screenshot)
     return request<UxPrompt>(`/projects/${projectId}/ux-prompts`, { method: 'POST', body: form })
   },

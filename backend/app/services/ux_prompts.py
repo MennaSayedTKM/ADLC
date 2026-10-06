@@ -1,20 +1,31 @@
 """
 ux_prompts.py
 Generates and manages Figma Make prompts from an approved requirements
-version's epics and stories (see ai/text/ux_prompt_generator.py for the prompt
-itself). Only APPROVED versions are eligible — the approval gate is what
-guarantees the stories a design is built from won't shift underneath it.
-Advisory only: the PM copies the prompt; nothing is sent anywhere.
+version (see ai/text/ux_prompt_generator.py for the prompts themselves).
+
+The model is "Lego": one Platform Blueprint prompt per project (vision, design
+system, app shell, a navigation slot per epic) and then one feature prompt per
+epic that snaps into its slot. Figma Make can't see the whole platform, so
+every feature/edit prompt is generated with a CONTEXT PACK built here from
+what the project already has — the saved design tokens, the sitemap, the
+screen registry (derived from saved prompts, so it can't drift), reusable
+component names, and the feature relationship map — which is how consistency
+survives across prompts.
+
+Only APPROVED versions are eligible: the approval gate is what guarantees the
+stories a design is built from won't shift underneath it. Advisory only: the
+PM copies the prompts; nothing is sent anywhere.
 """
 
 import io
+import re
 from typing import Any, Optional
 
 from PIL import Image
 from sqlalchemy import Integer, cast, func
 from sqlalchemy.orm import Session
 
-from ai.text.ux_prompt_generator import generate_ux_prompt
+from ai.text.ux_prompt_generator import analyze_feature_relationships, draft_vision, generate_ux_prompt
 from ai.vision.describe_screen import describe_screen
 from config import (
     GPT4O_INPUT_COST_PER_MILLION,
@@ -29,7 +40,11 @@ from config import (
 from ..db.models import AiCall, Document, Project, RequirementItem, UxPrompt
 from ..schemas.ux_prompts import StyleBriefIO, UxPromptOut
 
-_STYLE_KEYS = (
+# Brief fields the PM edits directly. Anything else on projects.style_brief
+# (sitemap, component_names, feature_map) is written by blueprint generation.
+_USER_TEXT_FIELDS = (
+    "vision",
+    "target_users",
     "reference_brand",
     "primary_color",
     "tone",
@@ -38,6 +53,17 @@ _STYLE_KEYS = (
     "brand_notes",
 )
 
+# Caps keep the context pack small — it is re-sent with every feature prompt.
+_CONTEXT_MAX_NAV = 24
+_CONTEXT_MAX_SCREENS = 40
+_CONTEXT_MAX_VISION_CHARS = 400
+
+
+class BlueprintExistsError(ValueError):
+    """A platform blueprint already exists for this project — regenerate it instead."""
+
+
+# ── Logging / cost ───────────────────────────────────────────────────────────
 
 def _estimate_cost(usage) -> float:
     input_cost = (usage.prompt_tokens / 1_000_000) * GPT4O_INPUT_COST_PER_MILLION
@@ -58,6 +84,8 @@ def _log_call(session: Session, project_id: str, document_id: str, model: str, u
         )
     )
 
+
+# ── Requirements tree ────────────────────────────────────────────────────────
 
 def _ordered_items(session: Session, document_id: str) -> list[RequirementItem]:
     items = (
@@ -84,63 +112,61 @@ def latest_approved_document(session: Session, project_id: str) -> Optional[Docu
     )
 
 
-def get_style_brief(project: Project) -> dict[str, Any]:
-    return dict(project.style_brief or {})
+def _get_approved_document(session: Session, project: Project, document_id: str) -> Document:
+    document = (
+        session.query(Document)
+        .filter(
+            Document.id == document_id,
+            Document.project_id == project.id,
+            Document.doc_type == "requirement",
+        )
+        .first()
+    )
+    if document is None:
+        raise LookupError(f"Requirement document {document_id} not found")
+    if document.approval_status != "approved":
+        raise ValueError(
+            "UI/UX prompts can only be generated from an approved requirements version — "
+            "approve this version first."
+        )
+    return document
 
 
-def save_style_brief(session: Session, project: Project, brief: StyleBriefIO) -> dict[str, Any]:
-    """
-    Replaces the visual fields with what the PM sent. design_tokens_summary is
-    only touched if the request explicitly included it, so saving the form
-    never wipes the summary a Foundation prompt produced.
-    """
-    updated = {k: v for k, v in brief.model_dump().items() if k in _STYLE_KEYS and v}
-    current = get_style_brief(project)
-    if "design_tokens_summary" in brief.model_fields_set:
-        if brief.design_tokens_summary:
-            updated["design_tokens_summary"] = brief.design_tokens_summary
-    elif current.get("design_tokens_summary"):
-        updated["design_tokens_summary"] = current["design_tokens_summary"]
-    project.style_brief = updated or None
-    session.flush()
-    return updated
+def _num(external_id: str) -> int:
+    digits = external_id[1:]
+    return int(digits) if digits.isdigit() else 0
 
 
-def suggest_mode(document: Document, style_brief: dict[str, Any]) -> str:
-    """
-    Default only — the PM always picks. A version forked from a change
-    request is an edit to something built; otherwise foundation until a
-    design system exists for the project, then new_feature.
-    """
-    if (document.type_metadata or {}).get("source_change_request_id"):
-        return "edit_existing"
-    return "new_feature" if style_brief.get("design_tokens_summary") else "foundation"
-
-
-def list_sources(session: Session, project: Project) -> dict[str, Any]:
-    doc = latest_approved_document(session, project.id)
-    brief = get_style_brief(project)
-    result: dict[str, Any] = {
-        "document": doc,
-        "epics": [],
-        "suggested_mode": "foundation",
-        "has_design_system": bool(brief.get("design_tokens_summary")),
-        "style_brief": brief,
-        "soft_char_limit": UX_PROMPT_SOFT_CHAR_LIMIT,
+def _story_dict(story: RequirementItem) -> dict[str, Any]:
+    return {
+        "external_id": story.external_id,
+        "title": story.text,
+        "description": story.description,
+        "acceptance_criteria": story.acceptance_criteria or [],
+        "scenarios": story.scenarios or [],
+        "error_handling": story.error_handling or [],
     }
-    if doc is None:
-        return result
 
-    items = _ordered_items(session, doc.id)
-    stories_by_epic: dict[str, list[RequirementItem]] = {}
+
+def _epic_dict(epic: RequirementItem) -> dict[str, Any]:
+    return {
+        "external_id": epic.external_id,
+        "title": epic.text,
+        "assumptions": epic.assumptions or [],
+        "dependencies": epic.dependencies or [],
+    }
+
+
+def _epics_with_stories(items: list[RequirementItem]) -> list[dict[str, Any]]:
+    by_epic: dict[str, list[RequirementItem]] = {}
     for item in items:
         if item.type == "story" and item.parent_id:
-            stories_by_epic.setdefault(item.parent_id, []).append(item)
-    result["epics"] = [
-        {"epic": e, "stories": stories_by_epic.get(e.id, [])} for e in items if e.type == "epic"
+            by_epic.setdefault(item.parent_id, []).append(item)
+    return [
+        {**_epic_dict(e), "stories": [_story_dict(s) for s in by_epic.get(e.id, [])]}
+        for e in items
+        if e.type == "epic"
     ]
-    result["suggested_mode"] = suggest_mode(doc, brief)
-    return result
 
 
 def _epic_and_stories(
@@ -158,34 +184,263 @@ def _epic_and_stories(
         if story is None or story.type != "story" or story.parent_id != epic.id:
             raise ValueError(f"Story {sid} does not belong to epic {epic.external_id}.")
         stories.append(story)
-    # Keep S-number order regardless of the order the client sent.
-    stories.sort(key=lambda s: int(s.external_id[1:]) if s.external_id[1:].isdigit() else 0)
+    stories.sort(key=lambda s: _num(s.external_id))  # S-number order, whatever order the client sent
     return epic, stories
 
 
-def _epic_dict(epic: RequirementItem) -> dict[str, Any]:
-    return {
-        "external_id": epic.external_id,
-        "title": epic.text,
-        "assumptions": epic.assumptions or [],
-        "dependencies": epic.dependencies or [],
-    }
+# ── Style brief ──────────────────────────────────────────────────────────────
+
+def get_style_brief(project: Project) -> dict[str, Any]:
+    return dict(project.style_brief or {})
 
 
-def _story_dict(story: RequirementItem) -> dict[str, Any]:
-    return {
-        "external_id": story.external_id,
-        "title": story.text,
-        "description": story.description,
-        "acceptance_criteria": story.acceptance_criteria or [],
-        "scenarios": story.scenarios or [],
-        "error_handling": story.error_handling or [],
-    }
+def save_style_brief(session: Session, project: Project, brief: StyleBriefIO) -> dict[str, Any]:
+    """
+    Applies the fields the PM sent; a field left out is left unchanged and an
+    empty value clears it. Never touches the system-written keys (sitemap,
+    component_names, feature_map), so saving the form can't wipe the blueprint.
+    """
+    sent = brief.model_fields_set
+    data = brief.model_dump()
+    current = get_style_brief(project)
+    for key in (*_USER_TEXT_FIELDS, "reference_styles", "design_tokens_summary"):
+        if key not in sent:
+            continue
+        if data[key]:
+            current[key] = data[key]
+        else:
+            current.pop(key, None)
+    project.style_brief = current or None
+    session.flush()
+    return current
 
 
-def _describe_screenshot(
-    session: Session, project_id: str, document_id: str, image_bytes: bytes, llm_client
+def suggest_mode(document: Document, has_blueprint: bool) -> str:
+    """
+    Default only — the PM always picks. Until a blueprint exists the next step
+    is the blueprint; a version forked from a change request is an edit to
+    something already built; otherwise it is a new feature.
+    """
+    if not has_blueprint:
+        return "foundation"
+    if (document.type_metadata or {}).get("source_change_request_id"):
+        return "edit_existing"
+    return "new_feature"
+
+
+# ── Feature relationships and ordering ───────────────────────────────────────
+
+def _sanitize_feature_map(features: list[dict[str, Any]], epic_ids: set[str]) -> list[dict[str, Any]]:
+    cleaned = []
+    for f in features:
+        eid = f.get("epic_external_id")
+        if eid not in epic_ids:
+            continue
+        cleaned.append(
+            {
+                "epic_external_id": eid,
+                "depends_on": [d for d in dict.fromkeys(f.get("depends_on", [])) if d in epic_ids and d != eid],
+                "integrates": [
+                    {"with_epic": i["with_epic"], "how": i["how"]}
+                    for i in f.get("integrates", [])
+                    if i.get("with_epic") in epic_ids and i["with_epic"] != eid
+                ],
+            }
+        )
+    return cleaned
+
+
+def order_epics(epic_ids: list[str], feature_map: list[dict[str, Any]]) -> list[str]:
+    """Dependencies first; E-number order among epics that are ready at the same time.
+    A dependency cycle is broken by E-number order rather than failing."""
+    wanted = set(epic_ids)
+    deps = {e: set() for e in epic_ids}
+    for f in feature_map:
+        if f["epic_external_id"] in wanted:
+            deps[f["epic_external_id"]] = {d for d in f.get("depends_on", []) if d in wanted}
+
+    ordered: list[str] = []
+    remaining = sorted(epic_ids, key=_num)
+    while remaining:
+        ready = [e for e in remaining if deps[e] <= set(ordered)]
+        pick = ready[0] if ready else remaining[0]
+        ordered.append(pick)
+        remaining.remove(pick)
+    return ordered
+
+
+# ── Sitemap, registry, context pack ──────────────────────────────────────────
+
+def _slug_route(title: str, fallback: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return "/" + (slug or fallback.lower())
+
+
+def _normalize_sitemap(nav_items: list[dict[str, Any]], epics: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """One valid, unique-route slot per epic — the model's nav_items where usable,
+    a title-derived fallback for any epic it missed."""
+    by_epic = {n.get("epic_external_id"): n for n in nav_items}
+    used: set[str] = set()
+    sitemap = []
+    for epic in epics:
+        item = by_epic.get(epic["external_id"]) or {}
+        label = (item.get("label") or epic["title"]).strip()
+        route = (item.get("route") or "").strip()
+        if not route.startswith("/") or route == "/":
+            route = _slug_route(label, epic["external_id"])
+        base, n = route, 2
+        while route in used:
+            route, n = f"{base}-{n}", n + 1
+        used.add(route)
+        sitemap.append({"epic_external_id": epic["external_id"], "label": label, "route": route})
+    return sitemap
+
+
+def _prompt_rows(session: Session, project_id: str, exclude_prompt_id: Optional[str] = None):
+    """(prompt, epic external id or None) for every prompt of this project, oldest first."""
+    query = (
+        session.query(UxPrompt, RequirementItem.external_id)
+        .join(Document, Document.id == UxPrompt.document_id)
+        .outerjoin(RequirementItem, RequirementItem.id == UxPrompt.epic_item_id)
+        .filter(Document.project_id == project_id)
+        .order_by(UxPrompt.created_at)
+    )
+    return [(p, ext) for p, ext in query.all() if p.id != exclude_prompt_id]
+
+
+def screen_registry(session: Session, project_id: str, exclude_prompt_id: Optional[str] = None) -> list[dict[str, str]]:
+    """Every screen designed so far, derived from saved prompts. A later prompt's
+    screen replaces an earlier one with the same route."""
+    by_route: dict[str, dict[str, str]] = {}
+    for prompt, epic_ext in _prompt_rows(session, project_id, exclude_prompt_id):
+        for screen in prompt.screens or []:
+            by_route[screen["route"]] = {
+                "name": screen["name"],
+                "route": screen["route"],
+                "purpose": screen.get("purpose", ""),
+                "owner": epic_ext or "Platform",
+            }
+    return list(by_route.values())
+
+
+def _sitemap_with_status(session: Session, project_id: str, brief: dict[str, Any]) -> list[dict[str, str]]:
+    designed = {ext for p, ext in _prompt_rows(session, project_id) if ext and p.mode != "foundation"}
+    return [
+        {**slot, "status": "designed" if slot["epic_external_id"] in designed else "placeholder"}
+        for slot in brief.get("sitemap") or []
+    ]
+
+
+def build_context_pack(
+    session: Session,
+    project: Project,
+    epic_external_id: str,
+    epic_titles: dict[str, str],
+    exclude_prompt_id: Optional[str] = None,
 ) -> str:
+    """
+    The platform context Figma Make is given with every feature/edit prompt so
+    the new piece matches what already exists. Deliberately compact: it is
+    re-sent with every prompt, and Figma credits scale with prompt size.
+    """
+    brief = get_style_brief(project)
+    sitemap = _sitemap_with_status(session, project.id, brief)
+    registry = screen_registry(session, project.id, exclude_prompt_id)
+    relation = next((f for f in brief.get("feature_map") or [] if f["epic_external_id"] == epic_external_id), None)
+    lines: list[str] = []
+
+    if brief.get("vision"):
+        lines.append("Platform vision: " + brief["vision"].strip()[:_CONTEXT_MAX_VISION_CHARS])
+    if brief.get("design_tokens_summary"):
+        lines.append("Design system (reuse exactly): " + brief["design_tokens_summary"].strip())
+    if brief.get("component_names"):
+        lines.append("Components to reuse: " + ", ".join(brief["component_names"]))
+    if sitemap:
+        lines.append("Navigation:")
+        for slot in sitemap[:_CONTEXT_MAX_NAV]:
+            marker = "  <- THIS FEATURE" if slot["epic_external_id"] == epic_external_id else ""
+            lines.append(f"- {slot['label']} -> {slot['route']} [{slot['status']}]{marker}")
+    mine = next((s for s in sitemap if s["epic_external_id"] == epic_external_id), None)
+    if mine:
+        lines.append(f"This feature's placeholder slot: {mine['label']} -> {mine['route']} (base route for its screens)")
+    if registry:
+        lines.append("Screens already designed (do not change):")
+        for s in registry[:_CONTEXT_MAX_SCREENS]:
+            lines.append(f"- {s['name']} ({s['route']})" + (f" - {s['purpose']}" if s["purpose"] else ""))
+
+    def screens_of(owner: str) -> str:
+        names = [f"{s['name']} ({s['route']})" for s in registry if s["owner"] == owner]
+        return "; ".join(names) if names else "not designed yet"
+
+    if relation and relation["depends_on"]:
+        lines.append("Depends on (build on / link to these):")
+        for d in relation["depends_on"]:
+            lines.append(f"- {d} {epic_titles.get(d, '')}: screens {screens_of(d)}")
+    if relation and relation["integrates"]:
+        lines.append("Integrates with:")
+        for i in relation["integrates"]:
+            lines.append(f"- {i['with_epic']} {epic_titles.get(i['with_epic'], '')}: {i['how']} (screens: {screens_of(i['with_epic'])})")
+    return "\n".join(lines)
+
+
+# ── Sources for the tab ──────────────────────────────────────────────────────
+
+def get_blueprint(session: Session, project_id: str) -> Optional[UxPrompt]:
+    rows = [p for p, _ in _prompt_rows(session, project_id) if p.mode == "foundation"]
+    return rows[-1] if rows else None
+
+
+def list_sources(session: Session, project: Project) -> dict[str, Any]:
+    doc = latest_approved_document(session, project.id)
+    brief = get_style_brief(project)
+    blueprint = get_blueprint(session, project.id)
+    result: dict[str, Any] = {
+        "document": doc,
+        "epics": [],
+        "suggested_mode": "foundation",
+        "has_blueprint": blueprint is not None,
+        "blueprint_prompt_id": blueprint.id if blueprint else None,
+        "epics_missing_from_blueprint": [],
+        "has_design_system": bool(brief.get("design_tokens_summary")),
+        "feature_map": brief.get("feature_map") or [],
+        "suggested_order": [],
+        "sitemap": _sitemap_with_status(session, project.id, brief),
+        "registry": screen_registry(session, project.id),
+        "style_brief": brief,
+        "soft_char_limit": UX_PROMPT_SOFT_CHAR_LIMIT,
+    }
+    if doc is None:
+        return result
+
+    items = _ordered_items(session, doc.id)
+    stories_by_epic: dict[str, list[RequirementItem]] = {}
+    for item in items:
+        if item.type == "story" and item.parent_id:
+            stories_by_epic.setdefault(item.parent_id, []).append(item)
+    epics = [i for i in items if i.type == "epic"]
+    result["epics"] = [{"epic": e, "stories": stories_by_epic.get(e.id, [])} for e in epics]
+    epic_ids = [e.external_id for e in epics]
+    result["suggested_order"] = order_epics(epic_ids, result["feature_map"])
+    result["suggested_mode"] = suggest_mode(doc, blueprint is not None)
+    in_sitemap = {s["epic_external_id"] for s in result["sitemap"]}
+    result["epics_missing_from_blueprint"] = [e for e in epic_ids if blueprint is not None and e not in in_sitemap]
+    return result
+
+
+def draft_platform_vision(session: Session, project: Project, llm_client) -> dict[str, str]:
+    """AI-drafted vision from the approved requirements. Not saved — the PM edits and saves it."""
+    doc = latest_approved_document(session, project.id)
+    if doc is None:
+        raise ValueError("Approve a requirements version first — the vision is drafted from its stories.")
+    epics = _epics_with_stories(_ordered_items(session, doc.id))
+    drafted, usage = draft_vision(epics, llm_client, model=UX_PROMPT_MODEL)
+    _log_call(session, project.id, doc.id, UX_PROMPT_MODEL, usage)
+    return drafted
+
+
+# ── Generation ───────────────────────────────────────────────────────────────
+
+def _describe_screenshot(session: Session, project_id: str, document_id: str, image_bytes: bytes, llm_client) -> str:
     try:
         image = Image.open(io.BytesIO(image_bytes))
         image.load()
@@ -198,7 +453,118 @@ def _describe_screenshot(
     return description
 
 
-def _run_generation(
+def _brief_snapshot(brief: dict[str, Any], screen_description: Optional[str] = None) -> dict[str, Any]:
+    snapshot = {k: brief[k] for k in _USER_TEXT_FIELDS if brief.get(k)}
+    if brief.get("reference_styles"):
+        snapshot["reference_styles"] = brief["reference_styles"]
+    if screen_description:
+        snapshot["existing_screen_description"] = screen_description
+    return snapshot
+
+
+def _generate_blueprint(
+    session: Session, project: Project, document: Document, llm_client
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Runs the blueprint generation and stores its structured outputs (design
+    tokens, sitemap, components, feature map) on the project's brief."""
+    epics = _epics_with_stories(_ordered_items(session, document.id))
+    if not epics:
+        raise ValueError("The approved version has no epics to plan navigation slots for.")
+    epic_ids = {e["external_id"] for e in epics}
+
+    feature_map: list[dict[str, Any]] = []
+    if len(epics) > 1:
+        relations, usage = analyze_feature_relationships(epics, llm_client, model=UX_PROMPT_MODEL)
+        _log_call(session, project.id, document.id, UX_PROMPT_MODEL, usage)
+        feature_map = _sanitize_feature_map(relations, epic_ids)
+
+    order = order_epics([e["external_id"] for e in epics], feature_map)
+    planned = sorted(epics, key=lambda e: order.index(e["external_id"]))
+
+    brief = get_style_brief(project)
+    data, usage = generate_ux_prompt(
+        "foundation", brief, llm_client, model=UX_PROMPT_MODEL, planned_features=planned
+    )
+    _log_call(session, project.id, document.id, UX_PROMPT_MODEL, usage)
+
+    project.style_brief = {
+        **brief,
+        "sitemap": _normalize_sitemap(data["nav_items"], planned),
+        "component_names": data["component_names"],
+        "feature_map": feature_map,
+        **({"design_tokens_summary": data["design_tokens_summary"].strip()} if data["design_tokens_summary"].strip() else {}),
+    }
+    session.flush()
+    return data, _brief_snapshot(brief)
+
+
+def create_ux_prompt(
+    session: Session,
+    project: Project,
+    document_id: str,
+    mode: str,
+    brief: StyleBriefIO,
+    llm_client,
+    epic_id: Optional[str] = None,
+    story_ids: Optional[list[str]] = None,
+    screenshot_bytes: Optional[bytes] = None,
+) -> UxPrompt:
+    document = _get_approved_document(session, project, document_id)
+    # The form the PM just filled in becomes the project's saved brief.
+    saved_brief = save_style_brief(session, project, brief)
+
+    if mode == "foundation":
+        if screenshot_bytes:
+            raise ValueError("A screenshot can only be attached in 'edit existing' mode.")
+        if get_blueprint(session, project.id) is not None:
+            raise BlueprintExistsError("This project already has a platform blueprint — regenerate it instead.")
+        data, snapshot = _generate_blueprint(session, project, document, llm_client)
+        prompt = UxPrompt(
+            document_id=document.id,
+            epic_item_id=None,
+            story_ids=[],
+            mode="foundation",
+            style_brief=snapshot,
+            screens=data["screens"],
+            prompt_text=data["prompt_text"].strip(),
+            is_stale=False,
+        )
+        session.add(prompt)
+        session.flush()
+        return prompt
+
+    if not epic_id:
+        raise ValueError("Choose an epic.")
+    epic, stories = _epic_and_stories(session, document, epic_id, list(story_ids or []))
+    if mode == "new_feature" and get_blueprint(session, project.id) is None and not saved_brief.get("design_tokens_summary"):
+        raise ValueError(
+            "Generate the platform blueprint first — new features are built to fit it. "
+            "(Or paste an existing design system summary into the style brief.)"
+        )
+
+    screen_description = None
+    if screenshot_bytes:
+        if mode != "edit_existing":
+            raise ValueError("A screenshot can only be attached in 'edit existing' mode.")
+        screen_description = _describe_screenshot(session, project.id, document.id, screenshot_bytes, llm_client)
+
+    data = _generate_feature(session, project, document, epic, stories, mode, saved_brief, llm_client, screen_description)
+    prompt = UxPrompt(
+        document_id=document.id,
+        epic_item_id=epic.id,
+        story_ids=[s.id for s in stories],
+        mode=mode,
+        style_brief=_brief_snapshot(saved_brief, screen_description),
+        screens=data["screens"],
+        prompt_text=data["prompt_text"].strip(),
+        is_stale=False,
+    )
+    session.add(prompt)
+    session.flush()
+    return prompt
+
+
+def _generate_feature(
     session: Session,
     project: Project,
     document: Document,
@@ -208,94 +574,22 @@ def _run_generation(
     brief: dict[str, Any],
     llm_client,
     screen_description: Optional[str],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Returns (generated data, snapshot to store on the prompt row)."""
-    tokens_summary = get_style_brief(project).get("design_tokens_summary")
+    exclude_prompt_id: Optional[str] = None,
+) -> dict[str, Any]:
+    titles = {i.external_id: i.text for i in _ordered_items(session, document.id) if i.type == "epic"}
+    context = build_context_pack(session, project, epic.external_id, titles, exclude_prompt_id)
     data, usage = generate_ux_prompt(
         mode,
-        _epic_dict(epic),
-        [_story_dict(s) for s in stories],
         brief,
         llm_client,
         model=UX_PROMPT_MODEL,
-        design_tokens_summary=tokens_summary,
+        epic=_epic_dict(epic),
+        stories=[_story_dict(s) for s in stories],
+        context_pack=context,
         existing_screen_description=screen_description,
     )
     _log_call(session, project.id, document.id, UX_PROMPT_MODEL, usage)
-
-    snapshot = {k: brief[k] for k in _STYLE_KEYS if brief.get(k)}
-    if screen_description:
-        snapshot["existing_screen_description"] = screen_description
-    snapshot["screen_names"] = data["screen_names"]
-    return data, snapshot
-
-
-def _remember_design_system(session: Session, project: Project, data: dict[str, Any]) -> None:
-    """A Foundation prompt defines the design system — keep its compact summary
-    so later new-feature / edit prompts extend it instead of reinventing it."""
-    summary = (data.get("design_tokens_summary") or "").strip()
-    if not summary:
-        return
-    project.style_brief = {**get_style_brief(project), "design_tokens_summary": summary}
-    session.flush()
-
-
-def create_ux_prompt(
-    session: Session,
-    project: Project,
-    document_id: str,
-    epic_id: str,
-    story_ids: list[str],
-    mode: str,
-    brief: StyleBriefIO,
-    llm_client,
-    screenshot_bytes: Optional[bytes] = None,
-) -> UxPrompt:
-    document = (
-        session.query(Document)
-        .filter(
-            Document.id == document_id,
-            Document.project_id == project.id,
-            Document.doc_type == "requirement",
-        )
-        .first()
-    )
-    if document is None:
-        raise LookupError(f"Requirement document {document_id} not found")
-    if document.approval_status != "approved":
-        raise ValueError(
-            "UI/UX prompts can only be generated from an approved requirements version — "
-            "approve this version first."
-        )
-    epic, stories = _epic_and_stories(session, document, epic_id, story_ids)
-
-    # The form the PM just filled in becomes the project's saved brief.
-    saved_brief = save_style_brief(session, project, brief)
-
-    screen_description = None
-    if screenshot_bytes:
-        if mode != "edit_existing":
-            raise ValueError("A screenshot can only be attached in 'edit existing' mode.")
-        screen_description = _describe_screenshot(session, project.id, document.id, screenshot_bytes, llm_client)
-
-    data, snapshot = _run_generation(
-        session, project, document, epic, stories, mode, saved_brief, llm_client, screen_description
-    )
-    if mode == "foundation":
-        _remember_design_system(session, project, data)
-
-    prompt = UxPrompt(
-        document_id=document.id,
-        epic_item_id=epic.id,
-        story_ids=[s.id for s in stories],
-        mode=mode,
-        style_brief=snapshot,
-        prompt_text=data["prompt_text"].strip(),
-        is_stale=False,
-    )
-    session.add(prompt)
-    session.flush()
-    return prompt
+    return data
 
 
 def _get_prompt(session: Session, project_id: str, prompt_id: str) -> UxPrompt:
@@ -310,34 +604,37 @@ def _get_prompt(session: Session, project_id: str, prompt_id: str) -> UxPrompt:
     return prompt
 
 
-def regenerate_ux_prompt(
-    session: Session, project: Project, prompt_id: str, llm_client
-) -> UxPrompt:
-    """Re-runs the same inputs (stories, mode, style snapshot, screenshot
-    description). Overwrites the text and discards any PM edits — the UI
-    confirms before calling this when edited_text exists."""
+def regenerate_ux_prompt(session: Session, project: Project, prompt_id: str, llm_client) -> UxPrompt:
+    """
+    Re-runs a prompt. A feature/edit prompt reuses its stories, mode and
+    screenshot description. The blueprint is re-run from the project's CURRENT
+    brief and the latest approved version — that is how a PM adds navigation
+    slots for epics approved since it was generated. Overwrites the text and
+    discards PM edits (the UI confirms first).
+    """
     prompt = _get_prompt(session, project.id, prompt_id)
-    document = session.query(Document).filter(Document.id == prompt.document_id).first()
-    epic, stories = _epic_and_stories(session, document, prompt.epic_item_id, list(prompt.story_ids))
 
-    snapshot = dict(prompt.style_brief or {})
-    data, new_snapshot = _run_generation(
-        session,
-        project,
-        document,
-        epic,
-        stories,
-        prompt.mode,
-        snapshot,
-        llm_client,
-        snapshot.get("existing_screen_description"),
-    )
     if prompt.mode == "foundation":
-        _remember_design_system(session, project, data)
+        document = latest_approved_document(session, project.id)
+        if document is None:
+            raise ValueError("There is no approved requirements version to regenerate from.")
+        data, snapshot = _generate_blueprint(session, project, document, llm_client)
+        prompt.document_id = document.id
+    else:
+        document = session.query(Document).filter(Document.id == prompt.document_id).first()
+        epic, stories = _epic_and_stories(session, document, prompt.epic_item_id, list(prompt.story_ids))
+        snapshot = dict(prompt.style_brief or {})
+        brief = {**get_style_brief(project), **snapshot}
+        data = _generate_feature(
+            session, project, document, epic, stories, prompt.mode, brief, llm_client,
+            snapshot.get("existing_screen_description"), exclude_prompt_id=prompt.id,
+        )
 
     prompt.prompt_text = data["prompt_text"].strip()
+    prompt.screens = data["screens"]
+    prompt.style_brief = snapshot
     prompt.edited_text = None
-    prompt.style_brief = new_snapshot
+    prompt.is_stale = False
     session.flush()
     return prompt
 
@@ -371,24 +668,20 @@ def mark_prompts_stale(session: Session, document_id: str) -> None:
 
 
 def to_out(session: Session, prompt: UxPrompt) -> UxPromptOut:
-    items = {
-        i.id: i
-        for i in session.query(RequirementItem)
-        .filter(RequirementItem.id.in_([prompt.epic_item_id, *prompt.story_ids]))
-        .all()
-    }
-    epic = items[prompt.epic_item_id]
-    story_external_ids = [items[sid].external_id for sid in prompt.story_ids if sid in items]
+    ids = [i for i in [prompt.epic_item_id, *prompt.story_ids] if i]
+    items = {i.id: i for i in session.query(RequirementItem).filter(RequirementItem.id.in_(ids)).all()} if ids else {}
+    epic = items.get(prompt.epic_item_id) if prompt.epic_item_id else None
     return UxPromptOut(
         id=prompt.id,
         document_id=prompt.document_id,
         epic_item_id=prompt.epic_item_id,
-        epic_external_id=epic.external_id,
-        epic_title=epic.text,
+        epic_external_id=epic.external_id if epic else None,
+        epic_title=epic.text if epic else None,
         story_ids=list(prompt.story_ids),
-        story_external_ids=story_external_ids,
+        story_external_ids=[items[sid].external_id for sid in prompt.story_ids if sid in items],
         mode=prompt.mode,
         style_brief=prompt.style_brief,
+        screens=prompt.screens or [],
         prompt_text=prompt.prompt_text,
         edited_text=prompt.edited_text,
         is_stale=prompt.is_stale,

@@ -76,6 +76,15 @@ ux_screenshot_model: gpt-4o
 ux_screenshot_detail: high
 ux_screenshot_max_tokens: 1500
 
+# ── Reference-site style extraction (UI/UX prompts) ─────────────────────────
+# The server fetches a PM-supplied public URL (read-only) and reads its HTML/CSS.
+# Private, loopback and link-local addresses are always refused.
+style_fetch_timeout_seconds: 8
+style_fetch_max_bytes: 1500000       # per HTML or stylesheet response
+style_fetch_max_stylesheets: 6
+style_fetch_max_redirects: 4
+style_fetch_user_agent: "TKMiND-StyleReader/1.0 (+design reference lookup)"
+
 # ── GPT-4o cost estimation (for ai_calls logging) ────────────────────────────
 # USD per 1,000,000 tokens. Update when OpenAI changes pricing.
 gpt4o_input_cost_per_million: 2.50

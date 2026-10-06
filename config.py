@@ -67,6 +67,13 @@ UX_SCREENSHOT_MODEL = str(_require("ux_screenshot_model"))
 UX_SCREENSHOT_DETAIL = str(_require("ux_screenshot_detail"))
 UX_SCREENSHOT_MAX_TOKENS = int(_require("ux_screenshot_max_tokens"))
 
+# Reference-site style extraction
+STYLE_FETCH_TIMEOUT_SECONDS = float(_require("style_fetch_timeout_seconds"))
+STYLE_FETCH_MAX_BYTES = int(_require("style_fetch_max_bytes"))
+STYLE_FETCH_MAX_STYLESHEETS = int(_require("style_fetch_max_stylesheets"))
+STYLE_FETCH_MAX_REDIRECTS = int(_require("style_fetch_max_redirects"))
+STYLE_FETCH_USER_AGENT = str(_require("style_fetch_user_agent"))
+
 # GPT-4o cost estimation
 GPT4O_INPUT_COST_PER_MILLION = float(_require("gpt4o_input_cost_per_million"))
 GPT4O_OUTPUT_COST_PER_MILLION = float(_require("gpt4o_output_cost_per_million"))

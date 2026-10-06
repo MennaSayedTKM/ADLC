@@ -277,8 +277,14 @@ class UxPrompt(Base):
 
     id = Column(String, primary_key=True, default=new_uuid)
     document_id = Column(String, ForeignKey("documents.id"), nullable=False)
-    epic_item_id = Column(String, ForeignKey("requirement_items.id"), nullable=False)
-    story_ids = Column(JSON, nullable=False)  # list[requirement_items.id] selected for this prompt
+    # Null for the Platform Blueprint (mode "foundation"): it is about the whole
+    # platform, not one epic. Feature / edit prompts always have an epic.
+    epic_item_id = Column(String, ForeignKey("requirement_items.id"), nullable=True)
+    story_ids = Column(JSON, nullable=False)  # list[requirement_items.id]; [] for the blueprint
+    # [{"name","route","purpose"}] — the screens this prompt designs. The
+    # project's screen registry (given to later prompts so features stay
+    # consistent) is derived from these, so deleting a prompt removes its screens.
+    screens = Column(JSON, nullable=True)
     mode = Column(String, nullable=False)
     style_brief = Column(JSON, nullable=True)  # snapshot of the brief (and screenshot description) used
     prompt_text = Column(Text, nullable=False)

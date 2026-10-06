@@ -7,7 +7,7 @@ import { Banner } from './ui/Banner'
 import './UxPromptCard.css'
 
 const MODE_LABEL: Record<UxPromptMode, string> = {
-  foundation: 'New platform',
+  foundation: 'Platform blueprint',
   new_feature: 'New feature',
   edit_existing: 'Edit existing',
 }
@@ -81,7 +81,7 @@ export function UxPromptCard({ projectId, prompt, onChanged, onDeleted }: Props)
   }
 
   async function handleDelete() {
-    if (!window.confirm(`Delete the ${prompt.epic_external_id} prompt? This cannot be undone.`)) return
+    if (!window.confirm(`Delete the ${prompt.epic_external_id ?? 'platform blueprint'} prompt? This cannot be undone.`)) return
     const done = await run(async () => {
       await api.deleteUxPrompt(projectId, prompt.id)
       return true
@@ -93,8 +93,8 @@ export function UxPromptCard({ projectId, prompt, onChanged, onDeleted }: Props)
     <article className="ux-card">
       <header className="ux-card__header">
         <div className="ux-card__title">
-          <span className="ux-card__epic-id">{prompt.epic_external_id}</span>
-          {prompt.epic_title}
+          {prompt.epic_external_id && <span className="ux-card__epic-id">{prompt.epic_external_id}</span>}
+          {prompt.epic_title ?? 'Platform blueprint'}
         </div>
         <div className="ux-card__badges">
           <Badge tone="accent">{MODE_LABEL[prompt.mode]}</Badge>
@@ -104,7 +104,9 @@ export function UxPromptCard({ projectId, prompt, onChanged, onDeleted }: Props)
       </header>
 
       <p className="ux-card__meta">
-        Stories: {prompt.story_external_ids.join(', ')} · generated{' '}
+        {prompt.story_external_ids.length > 0 ? `Stories: ${prompt.story_external_ids.join(', ')}` : 'Whole platform'}
+        {prompt.screens.length > 0 && ` · ${prompt.screens.length} ${prompt.screens.length === 1 ? 'screen' : 'screens'}`}
+        {' · generated '}
         {new Date(prompt.created_at).toLocaleString()}
       </p>
 
@@ -121,7 +123,7 @@ export function UxPromptCard({ projectId, prompt, onChanged, onDeleted }: Props)
         onChange={(e) => setText(e.target.value)}
         rows={14}
         spellCheck={false}
-        aria-label={`Figma Make prompt for ${prompt.epic_external_id}`}
+        aria-label={`Figma Make prompt for ${prompt.epic_external_id ?? 'the platform blueprint'}`}
         disabled={busy}
       />
 

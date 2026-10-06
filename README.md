@@ -147,16 +147,21 @@ npm run dev --prefix frontend
    questions, edit or add items, run an evaluation, then **Approve**.
    Approval locks the version; further edits create a new version. Change
    requests can be uploaded against an approved version.
-3. **UI/UX prompts** — on an *approved* version, pick an epic, choose which of
-   its stories to include, and choose a mode: **New platform** (design system,
-   app shell, first flows), **New feature** (reuses the saved design system) or
-   **Edit existing** (targeted change; optionally attach a screenshot of the
-   current screen). An optional style brief (reference brand such as Apple,
-   primary color, tone, light/dark, platform) is saved per project. The result
-   is a Figma Make prompt you can edit, copy, regenerate or delete; screens
-   and states are labelled with story ids so developers can trace designs back
-   to requirements. Prompts are marked *Outdated* when a newer requirements
-   version supersedes theirs. Nothing is sent to Figma.
+3. **UI/UX prompts** — built like blocks, from an *approved* version.
+   First a **Platform blueprint**: the platform's vision and users, a style
+   brief, and optional **reference websites** (the server reads their public
+   HTML/CSS and extracts colors, fonts, radii and shadows, which you can edit).
+   It produces one base prompt: design system, app shell, and a navigation
+   slot ("placeholder") for every epic. Then **features**: tick one or several
+   epics (and which of their stories), choose *New feature* or *Edit existing*
+   (optionally with a screenshot of the current screen), and one prompt per
+   epic is generated, dependencies first. Every feature prompt carries a
+   context pack (design tokens, navigation, screens already designed,
+   components to reuse, related features) so it stays consistent with the
+   rest of the platform. Paste the prompts into the **same Figma Make
+   project, in order**. Prompts can be edited, regenerated and copied, and are
+   marked *Outdated* when a newer requirements version supersedes theirs.
+   Nothing is sent to Figma.
 4. **Design review** — upload screen exports against the approved version.
    Each screen gets an alignment report; click a screen to see it next to its
    findings and mark each one resolved or dismissed.

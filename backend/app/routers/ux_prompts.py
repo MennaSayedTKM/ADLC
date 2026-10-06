@@ -14,16 +14,20 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from ..db.models import Project
-from ..db.session import get_db
+from ..db.session import get_db, get_session
 from ..deps import get_openai_client
 from ..schemas.ux_prompts import (
+    ReferenceStyleIO,
     StyleBriefIO,
+    StyleExtractRequest,
     UxPromptEditUpdate,
     UxPromptMode,
     UxPromptOut,
     UxPromptSources,
+    VisionDraftOut,
 )
 from ..services import ux_prompts as svc
+from ..services.style_reference import StyleFetchError, fetch_style_reference
 
 router = APIRouter(prefix="/projects/{project_id}/ux-prompts", tags=["ux-prompts"])
 
@@ -53,6 +57,32 @@ def save_style_brief(project_id: str, body: StyleBriefIO, db: Session = Depends(
     return svc.save_style_brief(db, project, body)
 
 
+@router.post("/style-references/extract", response_model=ReferenceStyleIO)
+def extract_style_reference(project_id: str, body: StyleExtractRequest):
+    """Reads a public website's colors, fonts, radii and shadows. Read-only and
+    not saved — the PM reviews/edits the tags and saves them with the style
+    brief. Private and internal addresses are refused (see services/style_reference.py)."""
+    # Check the project in a short session and release it before fetching:
+    # every DB session holds the app-wide lock (db/session.py), and a slow
+    # website must not stall everyone else's requests.
+    with get_session() as db:
+        _get_project_or_404(db, project_id)
+    try:
+        return fetch_style_reference(body.url)
+    except StyleFetchError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/vision/draft", response_model=VisionDraftOut)
+def draft_vision(project_id: str, db: Session = Depends(get_db), llm_client=Depends(get_openai_client)):
+    """AI-drafts a platform vision from the approved requirements. Not saved."""
+    project = _get_project_or_404(db, project_id)
+    try:
+        return svc.draft_platform_vision(db, project, llm_client)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 @router.get("", response_model=list[UxPromptOut])
 def list_prompts(project_id: str, db: Session = Depends(get_db)):
     _get_project_or_404(db, project_id)
@@ -63,8 +93,8 @@ def list_prompts(project_id: str, db: Session = Depends(get_db)):
 async def create_prompt(
     project_id: str,
     document_id: str = Form(...),
-    epic_id: str = Form(...),
-    story_ids: str = Form(..., description="JSON array of story item ids"),
+    epic_id: Optional[str] = Form(None, description="Required for feature/edit prompts; omit for the blueprint"),
+    story_ids: str = Form("[]", description="JSON array of story item ids"),
     mode: UxPromptMode = Form(...),
     style_brief: Optional[str] = Form(None, description="JSON StyleBrief; saved as the project's brief"),
     screenshot: Optional[UploadFile] = File(None),
@@ -96,10 +126,12 @@ async def create_prompt(
 
     try:
         prompt = svc.create_ux_prompt(
-            db, project, document_id, epic_id, ids, mode, brief, llm_client, screenshot_bytes
+            db, project, document_id, mode, brief, llm_client, epic_id, ids, screenshot_bytes
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except svc.BlueprintExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return svc.to_out(db, prompt)

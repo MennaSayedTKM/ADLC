@@ -1,13 +1,15 @@
 """
-HTTP-level tests for the UI/UX Prompts feature (Figma Make prompts generated
-from an approved requirements version's epics/stories). OpenAI is mocked:
-get_openai_client returns a fake whose chat.completions.create answers a
-tool-call request (the prompt itself) or a plain-content request (the
-optional screenshot description), so the real generator, service and router
-all run — only the model is fake.
+HTTP-level tests for the UI/UX Prompts feature: a Platform Blueprint prompt
+for the whole platform, then one feature/edit prompt per epic that snaps into
+the blueprint's navigation slots, kept consistent through a context pack.
+OpenAI is mocked: get_openai_client returns a fake that answers by tool name
+(the prompt, the feature-relationship map, the vision draft) or, with no
+tools, a screenshot description — so the real generator, service and router
+all run, only the model is fake.
 """
 import io
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -26,44 +28,76 @@ from app.db.session import get_session
 from app.deps import get_openai_client
 from app.main import app
 from app.services import requirements_review as review
+from app.services import style_reference
+from app.services.ux_prompts import order_epics
 
-PROMPT_TEXT = "PRODUCT CONTEXT\n- Strategy tool\nSCREENS\n- Screen: Hierarchy List (S1, S2)\nDO NOT\n- add extras"
 TOKENS = "Primary #0A66FF; Inter 14/16/20; 8pt spacing; radius 8; sidebar shell"
 
 
-def _tool_response(prompt_text=PROMPT_TEXT, tokens=TOKENS):
-    args = json.dumps(
-        {"prompt_text": prompt_text, "screen_names": ["Hierarchy List"], "design_tokens_summary": tokens}
-    )
-    call = SimpleNamespace(function=SimpleNamespace(name="record_ux_prompt", arguments=args))
+def _response(payload=None, tool_name=None, content=""):
+    if tool_name:
+        call = SimpleNamespace(function=SimpleNamespace(name=tool_name, arguments=json.dumps(payload)))
+        message = SimpleNamespace(tool_calls=[call], content="")
+    else:
+        message = SimpleNamespace(tool_calls=None, content=content)
     return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[call], content=""))],
+        choices=[SimpleNamespace(message=message)],
         usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=500),
     )
 
 
-def _vision_response(text="Table screen with a filter bar and a 'New item' button."):
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=None, content=text))],
-        usage=SimpleNamespace(prompt_tokens=800, completion_tokens=120),
-    )
-
-
 class FakeLLM:
-    def __init__(self):
+    """Answers each kind of call the feature makes. `relations` is the feature map the model 'finds'."""
+
+    def __init__(self, relations=None):
+        self.relations = relations or []
         self.client = MagicMock()
         self.client.chat.completions.create.side_effect = self._create
 
     def _create(self, **kwargs):
-        return _tool_response() if kwargs.get("tools") else _vision_response()
+        tools = kwargs.get("tools")
+        if not tools:
+            return _response(content="Table screen with a filter bar and a 'New item' button.")
+        name = tools[0]["function"]["name"]
+        if name == "record_feature_relationships":
+            return _response({"features": self.relations}, name)
+        if name == "record_vision":
+            return _response({"vision": "A calm strategy tool.", "target_users": "Strategy Office"}, name)
 
-    def user_messages(self):
-        """The user-message text of every prompt-generation call made so far."""
-        out = []
-        for call in self.client.chat.completions.create.call_args_list:
-            if call.kwargs.get("tools"):
-                out.append(call.kwargs["messages"][1]["content"])
-        return out
+        user = kwargs["messages"][1]["content"]
+        if "PLANNED FEATURES" in user:  # platform blueprint
+            planned = re.findall(r"^(E\d+): (.+)$", user, re.M)
+            return _response(
+                {
+                    "prompt_text": "BLUEPRINT\n- vision\nPLACEHOLDERS\n" + "\n".join(f"- {e} {t}" for e, t in planned),
+                    "screens": [{"name": "Home", "route": "/home", "purpose": "Landing dashboard"}],
+                    "design_tokens_summary": TOKENS,
+                    "nav_items": [
+                        {"epic_external_id": e, "label": t, "route": f"/{e.lower()}-slot"} for e, t in planned
+                    ],
+                    "component_names": ["Button", "DataTable"],
+                },
+                name,
+            )
+        epic = re.search(r"^EPIC (E\d+):", user, re.M).group(1)
+        return _response(
+            {
+                "prompt_text": f"FEATURE {epic}\nSCREENS\n- Screen: {epic} List",
+                "screens": [{"name": f"{epic} List", "route": f"/{epic.lower()}/list", "purpose": f"List for {epic}"}],
+                "design_tokens_summary": "",
+                "nav_items": [],
+                "component_names": [],
+            },
+            name,
+        )
+
+    def prompt_requests(self):
+        """User-message text of every record_ux_prompt call so far, in order."""
+        return [
+            c.kwargs["messages"][1]["content"]
+            for c in self.client.chat.completions.create.call_args_list
+            if c.kwargs.get("tools") and c.kwargs["tools"][0]["function"]["name"] == "record_ux_prompt"
+        ]
 
     @property
     def call_count(self):
@@ -91,22 +125,26 @@ def project_id(client):
     return r.json()["id"]
 
 
-def _seed(project_id, approved=True, from_change_request=False):
-    """One requirements version: epic E1 with stories S1, S2; epic E2 with S3."""
+def _seed(project_id, approved=True, from_change_request=False, version=1, extra_epic=False):
+    """One requirements version: E1 (S1, S2), E2 (S3) and optionally E3 (S4)."""
     with get_session() as s:
         doc = Document(
             project_id=project_id,
             doc_type="requirement",
-            version=1,
+            version=version,
             approval_status="approved" if approved else "draft",
             source_filename="sow.pdf",
             type_metadata={"source_change_request_id": "cr-1"} if from_change_request else None,
         )
         s.add(doc)
         s.flush()
-        e1 = RequirementItem(document_id=doc.id, type="epic", external_id="E1", text="Strategy hierarchy")
-        e2 = RequirementItem(document_id=doc.id, type="epic", external_id="E2", text="Reporting")
-        s.add_all([e1, e2])
+        epics = {"e1": "Strategy hierarchy", "e2": "Reporting"}
+        if extra_epic:
+            epics["e3"] = "Notifications"
+        rows = {}
+        for key, title in epics.items():
+            rows[key] = RequirementItem(document_id=doc.id, type="epic", external_id=key.upper(), text=title)
+        s.add_all(rows.values())
         s.flush()
 
         def story(ext, epic, title):
@@ -114,7 +152,7 @@ def _seed(project_id, approved=True, from_change_request=False):
                 document_id=doc.id,
                 type="story",
                 external_id=ext,
-                parent_id=epic.id,
+                parent_id=rows[epic].id,
                 text=title,
                 description=f"As an Admin, I want {title.lower()}, so that I can work faster.",
                 acceptance_criteria=[{"text": "Item appears in the list", "out_of_scope": False}],
@@ -122,13 +160,24 @@ def _seed(project_id, approved=True, from_change_request=False):
                 error_handling=[{"condition": "Name missing", "message": "Enter a name."}],
             )
 
-        s1, s2, s3 = story("S1", e1, "Create hierarchy"), story("S2", e1, "Edit hierarchy"), story("S3", e2, "View report")
-        s.add_all([s1, s2, s3])
+        stories = {
+            "s1": story("S1", "e1", "Create hierarchy"),
+            "s2": story("S2", "e1", "Edit hierarchy"),
+            "s3": story("S3", "e2", "View report"),
+        }
+        if extra_epic:
+            stories["s4"] = story("S4", "e3", "Send alert")
+        s.add_all(stories.values())
         s.flush()
-        return {"doc": doc.id, "e1": e1.id, "e2": e2.id, "s1": s1.id, "s2": s2.id, "s3": s3.id}
+        return {"doc": doc.id, **{k: v.id for k, v in rows.items()}, **{k: v.id for k, v in stories.items()}}
 
 
-def _generate(client, project_id, ids, mode="foundation", story_keys=("s1", "s2"), epic="e1", **extra):
+def _blueprint(client, project_id, ids, **extra):
+    data = {"document_id": ids["doc"], "mode": "foundation", **extra}
+    return client.post(f"/projects/{project_id}/ux-prompts", data=data)
+
+
+def _feature(client, project_id, ids, epic="e1", story_keys=("s1", "s2"), mode="new_feature", **extra):
     data = {
         "document_id": ids["doc"],
         "epic_id": ids[epic],
@@ -148,100 +197,255 @@ def _png_bytes():
 def _ai_calls(project_id):
     with get_session() as s:
         rows = s.query(AiCall).filter(AiCall.project_id == project_id, AiCall.call_type == "ux_prompt").all()
-        return [SimpleNamespace(input_tokens=r.input_tokens, output_tokens=r.output_tokens) for r in rows]
+        return [SimpleNamespace(input_tokens=r.input_tokens) for r in rows]
 
+
+def _sources(client, project_id):
+    return client.get(f"/projects/{project_id}/ux-prompts/sources").json()
+
+
+# ── Sources and gating ───────────────────────────────────────────────────────
 
 def test_sources_empty_until_a_version_is_approved(client, project_id):
-    r = client.get(f"/projects/{project_id}/ux-prompts/sources")
-    assert r.status_code == 200
-    assert r.json()["document"] is None
-    assert r.json()["epics"] == []
+    body = _sources(client, project_id)
+    assert body["document"] is None and body["epics"] == []
 
     _seed(project_id, approved=False)
-    assert client.get(f"/projects/{project_id}/ux-prompts/sources").json()["document"] is None
+    assert _sources(client, project_id)["document"] is None
 
 
-def test_sources_lists_epics_with_stories_and_defaults_to_foundation(client, project_id):
+def test_sources_default_to_blueprint_first(client, project_id):
     ids = _seed(project_id)
-    body = client.get(f"/projects/{project_id}/ux-prompts/sources").json()
+    body = _sources(client, project_id)
     assert body["document"]["id"] == ids["doc"]
     assert [e["epic"]["external_id"] for e in body["epics"]] == ["E1", "E2"]
-    assert [s["external_id"] for s in body["epics"][0]["stories"]] == ["S1", "S2"]
     assert body["suggested_mode"] == "foundation"
-    assert body["has_design_system"] is False
-
-
-def test_change_request_version_suggests_edit_existing(client, project_id):
-    _seed(project_id, from_change_request=True)
-    assert client.get(f"/projects/{project_id}/ux-prompts/sources").json()["suggested_mode"] == "edit_existing"
+    assert body["has_blueprint"] is False
 
 
 def test_generation_requires_an_approved_version(client, project_id, llm):
     ids = _seed(project_id, approved=False)
-    r = _generate(client, project_id, ids)
-    assert r.status_code == 422
-    assert "approved" in r.json()["detail"]
+    r = _blueprint(client, project_id, ids)
+    assert r.status_code == 422 and "approved" in r.json()["detail"]
     assert llm.call_count == 0
-
-
-def test_foundation_generation_saves_prompt_logs_cost_and_remembers_design_system(client, project_id, llm):
-    ids = _seed(project_id)
-    brief = {"reference_brand": "Apple HIG", "primary_color": "#0A66FF", "appearance": "both", "platform": "web"}
-    r = _generate(client, project_id, ids, style_brief=json.dumps(brief))
-    assert r.status_code == 201, r.text
-    body = r.json()
-    assert body["mode"] == "foundation"
-    assert body["prompt_text"] == PROMPT_TEXT
-    assert body["epic_external_id"] == "E1"
-    assert body["story_external_ids"] == ["S1", "S2"]
-    assert body["is_stale"] is False
-    assert body["char_count"] == len(PROMPT_TEXT)
-    assert body["style_brief"]["reference_brand"] == "Apple HIG"
-
-    # the model saw the stories' scenarios and error wording, and the brief
-    sent = llm.user_messages()[0]
-    assert "Create hierarchy" in sent and "Enter a name." in sent and "Apple HIG" in sent
-    assert "View report" not in sent  # story from another epic was not selected
-
-    calls = _ai_calls(project_id)
-    assert len(calls) == 1 and calls[0].input_tokens == 1000
-
-    # the design system is remembered, and the brief is saved on the project
-    sources = client.get(f"/projects/{project_id}/ux-prompts/sources").json()
-    assert sources["has_design_system"] is True
-    assert sources["suggested_mode"] == "new_feature"
-    assert sources["style_brief"]["primary_color"] == "#0A66FF"
-    assert sources["style_brief"]["design_tokens_summary"] == TOKENS
-
-
-def test_new_feature_prompt_receives_saved_design_tokens_and_leaves_them_alone(client, project_id, llm):
-    ids = _seed(project_id)
-    assert _generate(client, project_id, ids).status_code == 201  # foundation saves tokens
-    with get_session() as s:
-        s.query(Project).filter(Project.id == project_id).one().style_brief = {"design_tokens_summary": "SAVED TOKENS"}
-
-    r = _generate(client, project_id, ids, mode="new_feature", epic="e2", story_keys=("s3",))
-    assert r.status_code == 201, r.text
-    assert "SAVED TOKENS" in llm.user_messages()[-1]
-    # a non-foundation generation must not overwrite the saved design system
-    assert client.get(f"/projects/{project_id}/ux-prompts/sources").json()["style_brief"]["design_tokens_summary"] == "SAVED TOKENS"
-
-
-def test_stories_must_belong_to_the_epic(client, project_id, llm):
-    ids = _seed(project_id)
-    r = _generate(client, project_id, ids, story_keys=("s1", "s3"))  # s3 is under E2
-    assert r.status_code == 422
-    assert "does not belong" in r.json()["detail"]
-    assert llm.call_count == 0
-
-    assert _generate(client, project_id, ids, story_keys=()).status_code == 422
 
 
 def test_unknown_document_is_404(client, project_id):
     ids = _seed(project_id)
     ids["doc"] = "nope"
-    assert _generate(client, project_id, ids).status_code == 404
+    assert _blueprint(client, project_id, ids).status_code == 404
 
+
+# ── Platform blueprint ───────────────────────────────────────────────────────
+
+def test_blueprint_is_not_tied_to_an_epic_and_gives_every_epic_a_slot(client, project_id, llm):
+    ids = _seed(project_id)
+    brief = {"vision": "A calm platform for the Strategy Office", "reference_brand": "Apple", "platform": "web"}
+    r = _blueprint(client, project_id, ids, style_brief=json.dumps(brief))
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["mode"] == "foundation"
+    assert body["epic_item_id"] is None and body["epic_external_id"] is None and body["story_ids"] == []
+    assert body["screens"] == [{"name": "Home", "route": "/home", "purpose": "Landing dashboard"}]
+
+    # the model was asked about the whole platform: vision + every planned epic, not one epic
+    sent = llm.prompt_requests()[0]
+    assert "A calm platform for the Strategy Office" in sent
+    assert "E1: Strategy hierarchy" in sent and "E2: Reporting" in sent
+
+    sources = _sources(client, project_id)
+    assert sources["has_blueprint"] is True and sources["blueprint_prompt_id"] == body["id"]
+    assert [(s["epic_external_id"], s["status"]) for s in sources["sitemap"]] == [("E1", "placeholder"), ("E2", "placeholder")]
+    assert sources["style_brief"]["design_tokens_summary"] == TOKENS
+    assert sources["style_brief"]["component_names"] == ["Button", "DataTable"]
+    assert sources["suggested_mode"] == "new_feature"
+    assert sources["registry"][0]["owner"] == "Platform"
+
+    # relationships call + prompt call, both logged
+    assert llm.call_count == 2 and len(_ai_calls(project_id)) == 2
+
+
+def test_blueprint_without_a_vision_still_generates(client, project_id, llm):
+    ids = _seed(project_id)
+    assert _blueprint(client, project_id, ids).status_code == 201
+    assert "not provided" in llm.prompt_requests()[0]
+
+
+def test_blueprint_includes_extracted_reference_styles(client, project_id, llm):
+    ids = _seed(project_id)
+    ref = {
+        "url": "https://example.com",
+        "title": "Example",
+        "note": "overall feel",
+        "style_tags": {
+            "palette": [{"hex": "#0071E3", "count": 12, "kind": "accent"}],
+            "accent_guess": "#0071E3",
+            "fonts": ["SF Pro Display"],
+            "radii": ["12px"],
+        },
+    }
+    assert _blueprint(client, project_id, ids, style_brief=json.dumps({"reference_styles": [ref]})).status_code == 201
+    sent = llm.prompt_requests()[0]
+    assert "REFERENCE STYLES" in sent and "#0071E3" in sent and "SF Pro Display" in sent and "overall feel" in sent
+
+
+def test_only_one_blueprint_per_project(client, project_id, llm):
+    ids = _seed(project_id)
+    assert _blueprint(client, project_id, ids).status_code == 201
+    r = _blueprint(client, project_id, ids)
+    assert r.status_code == 409 and "regenerate" in r.json()["detail"]
+
+
+def test_regenerating_the_blueprint_picks_up_epics_approved_later(client, project_id, llm):
+    ids = _seed(project_id)
+    pid = _blueprint(client, project_id, ids).json()["id"]
+
+    ids2 = _seed(project_id, version=2, extra_epic=True)  # a newer approved version with a new epic E3
+    sources = _sources(client, project_id)
+    assert sources["document"]["id"] == ids2["doc"]
+    assert sources["epics_missing_from_blueprint"] == ["E3"]
+
+    r = client.post(f"/projects/{project_id}/ux-prompts/{pid}/regenerate")
+    assert r.status_code == 200, r.text
+    assert r.json()["document_id"] == ids2["doc"]
+    sources = _sources(client, project_id)
+    assert sources["epics_missing_from_blueprint"] == []
+    assert [s["epic_external_id"] for s in sources["sitemap"]] == ["E1", "E2", "E3"]
+
+
+def test_blueprint_survives_a_style_brief_save(client, project_id):
+    ids = _seed(project_id)
+    _blueprint(client, project_id, ids)
+
+    r = client.put(f"/projects/{project_id}/ux-prompts/style-brief", json={"tone": "calm, precise"})
+    assert r.status_code == 200
+    saved = _sources(client, project_id)["style_brief"]
+    assert saved["tone"] == "calm, precise"
+    assert saved["design_tokens_summary"] == TOKENS and len(saved["sitemap"]) == 2  # untouched
+
+    client.put(f"/projects/{project_id}/ux-prompts/style-brief", json={"design_tokens_summary": "PASTED", "tone": ""})
+    saved = _sources(client, project_id)["style_brief"]
+    assert saved["design_tokens_summary"] == "PASTED" and "tone" not in saved
+
+
+def test_draft_vision_needs_an_approved_version_and_is_not_saved(client, project_id, llm):
+    assert client.post(f"/projects/{project_id}/ux-prompts/vision/draft").status_code == 422
+    _seed(project_id)
+    r = client.post(f"/projects/{project_id}/ux-prompts/vision/draft")
+    assert r.status_code == 200 and r.json() == {"vision": "A calm strategy tool.", "target_users": "Strategy Office"}
+    assert "vision" not in _sources(client, project_id)["style_brief"]
+    assert len(_ai_calls(project_id)) == 1
+
+
+# ── Feature prompts and consistency ──────────────────────────────────────────
+
+def test_feature_needs_the_blueprint_first(client, project_id, llm):
+    ids = _seed(project_id)
+    r = _feature(client, project_id, ids)
+    assert r.status_code == 422 and "blueprint" in r.json()["detail"]
+    assert llm.call_count == 0
+
+    # ...unless the PM supplies an existing design system summary
+    client.put(f"/projects/{project_id}/ux-prompts/style-brief", json={"design_tokens_summary": "PASTED SYSTEM"})
+    assert _feature(client, project_id, ids).status_code == 201
+    assert "PASTED SYSTEM" in llm.prompt_requests()[-1]
+
+
+def test_feature_prompt_carries_the_platform_context(client, project_id, llm):
+    ids = _seed(project_id)
+    _blueprint(client, project_id, ids, style_brief=json.dumps({"vision": "A calm strategy platform"}))
+
+    r = _feature(client, project_id, ids, epic="e1")
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["mode"] == "new_feature" and body["epic_external_id"] == "E1"
+    assert body["story_external_ids"] == ["S1", "S2"]
+    assert body["screens"][0]["route"] == "/e1/list"
+
+    sent = llm.prompt_requests()[-1]
+    assert "PLATFORM CONTEXT" in sent
+    assert TOKENS in sent                                    # the design system to reuse
+    assert "Components to reuse: Button, DataTable" in sent  # component inventory
+    assert "Strategy hierarchy -> /e1-slot [placeholder]  <- THIS FEATURE" in sent  # its slot
+    assert "Reporting -> /e2-slot [placeholder]" in sent     # the rest of the navigation
+    assert "Home (/home)" in sent                            # screens already designed
+    assert "Create hierarchy" in sent and "Enter a name." in sent
+    assert "View report" not in sent                         # S3 belongs to another epic
+
+    # the slot is now designed, and the new screens joined the registry
+    sources = _sources(client, project_id)
+    assert {s["epic_external_id"]: s["status"] for s in sources["sitemap"]} == {"E1": "designed", "E2": "placeholder"}
+    assert "/e1/list" in [s["route"] for s in sources["registry"]]
+
+
+def test_dependent_feature_sees_the_screens_it_depends_on(client, project_id, llm):
+    llm.relations = [
+        {"epic_external_id": "E1", "depends_on": [], "integrates": []},
+        {
+            "epic_external_id": "E2",
+            "depends_on": ["E1", "E2", "E9"],  # self and unknown ids must be dropped
+            "integrates": [{"with_epic": "E1", "how": "report rows link back to hierarchy items"}],
+        },
+    ]
+    ids = _seed(project_id)
+    _blueprint(client, project_id, ids)
+    assert _sources(client, project_id)["feature_map"][1]["depends_on"] == ["E1"]
+
+    _feature(client, project_id, ids, epic="e1")
+    _feature(client, project_id, ids, epic="e2", story_keys=("s3",))
+    sent = llm.prompt_requests()[-1]
+    assert "Depends on" in sent and "E1 Strategy hierarchy: screens E1 List (/e1/list)" in sent
+    assert "report rows link back to hierarchy items" in sent
+
+
+def test_suggested_order_puts_dependencies_first(client, project_id, llm):
+    llm.relations = [{"epic_external_id": "E1", "depends_on": ["E2"], "integrates": []}]
+    ids = _seed(project_id)
+    _blueprint(client, project_id, ids)
+    assert _sources(client, project_id)["suggested_order"] == ["E2", "E1"]
+
+
+def test_order_epics_ties_and_cycles():
+    assert order_epics(["E3", "E1", "E2"], []) == ["E1", "E2", "E3"]
+    fm = [
+        {"epic_external_id": "E1", "depends_on": ["E2"]},
+        {"epic_external_id": "E2", "depends_on": ["E1"]},  # cycle: must still terminate
+        {"epic_external_id": "E3", "depends_on": []},
+    ]
+    assert sorted(order_epics(["E1", "E2", "E3"], fm)) == ["E1", "E2", "E3"]
+
+
+def test_deleting_a_feature_prompt_removes_its_screens_from_the_registry(client, project_id):
+    ids = _seed(project_id)
+    _blueprint(client, project_id, ids)
+    pid = _feature(client, project_id, ids).json()["id"]
+    assert "/e1/list" in [s["route"] for s in _sources(client, project_id)["registry"]]
+
+    assert client.delete(f"/projects/{project_id}/ux-prompts/{pid}").status_code == 204
+    sources = _sources(client, project_id)
+    assert "/e1/list" not in [s["route"] for s in sources["registry"]]
+    assert sources["sitemap"][0]["status"] == "placeholder"
+
+
+def test_stories_must_belong_to_the_epic(client, project_id, llm):
+    ids = _seed(project_id)
+    _blueprint(client, project_id, ids)
+    calls = llm.call_count
+    r = _feature(client, project_id, ids, story_keys=("s1", "s3"))  # s3 is under E2
+    assert r.status_code == 422 and "does not belong" in r.json()["detail"]
+    assert _feature(client, project_id, ids, story_keys=()).status_code == 422
+    assert llm.call_count == calls
+
+
+def test_feature_requires_an_epic(client, project_id):
+    ids = _seed(project_id)
+    r = client.post(
+        f"/projects/{project_id}/ux-prompts", data={"document_id": ids["doc"], "mode": "new_feature"}
+    )
+    assert r.status_code == 422
+
+
+# ── Edit existing and screenshots ────────────────────────────────────────────
 
 def test_edit_existing_with_screenshot_describes_it_first(client, project_id, llm):
     ids = _seed(project_id)
@@ -257,20 +461,21 @@ def test_edit_existing_with_screenshot_describes_it_first(client, project_id, ll
     )
     assert r.status_code == 201, r.text
     assert llm.call_count == 2  # one vision call, one generation call
-    assert "filter bar" in llm.user_messages()[0]
+    assert "filter bar" in llm.prompt_requests()[0]
     assert r.json()["style_brief"]["existing_screen_description"].startswith("Table screen")
     assert len(_ai_calls(project_id)) == 2
 
 
 def test_screenshot_only_allowed_in_edit_mode(client, project_id, llm):
     ids = _seed(project_id)
+    _blueprint(client, project_id, ids)
+    calls = llm.call_count
     r = client.post(
         f"/projects/{project_id}/ux-prompts",
-        data={"document_id": ids["doc"], "epic_id": ids["e1"], "story_ids": json.dumps([ids["s1"]]), "mode": "foundation"},
+        data={"document_id": ids["doc"], "epic_id": ids["e1"], "story_ids": json.dumps([ids["s1"]]), "mode": "new_feature"},
         files={"screenshot": ("current.png", _png_bytes(), "image/png")},
     )
-    assert r.status_code == 422
-    assert llm.call_count == 0
+    assert r.status_code == 422 and llm.call_count == calls
 
 
 def test_screenshot_must_be_a_supported_image(client, project_id, llm):
@@ -280,22 +485,30 @@ def test_screenshot_must_be_a_supported_image(client, project_id, llm):
         data={"document_id": ids["doc"], "epic_id": ids["e1"], "story_ids": json.dumps([ids["s1"]]), "mode": "edit_existing"},
         files={"screenshot": ("notes.txt", b"hello", "text/plain")},
     )
-    assert r.status_code == 400
-    assert llm.call_count == 0
+    assert r.status_code == 400 and llm.call_count == 0
 
+
+def test_change_request_version_suggests_edit_once_a_blueprint_exists(client, project_id):
+    ids = _seed(project_id, from_change_request=True)
+    assert _sources(client, project_id)["suggested_mode"] == "foundation"
+    _blueprint(client, project_id, ids)
+    assert _sources(client, project_id)["suggested_mode"] == "edit_existing"
+
+
+# ── Editing, regenerating, listing ───────────────────────────────────────────
 
 def test_edit_reset_and_regenerate(client, project_id, llm):
     ids = _seed(project_id)
-    pid = _generate(client, project_id, ids).json()["id"]
+    _blueprint(client, project_id, ids)
+    created = _feature(client, project_id, ids).json()
+    pid, original = created["id"], created["prompt_text"]
 
     r = client.patch(f"/projects/{project_id}/ux-prompts/{pid}", json={"edited_text": "my tweaked prompt"})
-    assert r.json()["edited_text"] == "my tweaked prompt"
-    assert r.json()["prompt_text"] == PROMPT_TEXT  # original is preserved
+    assert r.json()["edited_text"] == "my tweaked prompt" and r.json()["prompt_text"] == original
     assert r.json()["char_count"] == len("my tweaked prompt")
 
-    # an edit identical to the generated text is stored as no edit
-    r = client.patch(f"/projects/{project_id}/ux-prompts/{pid}", json={"edited_text": PROMPT_TEXT})
-    assert r.json()["edited_text"] is None
+    r = client.patch(f"/projects/{project_id}/ux-prompts/{pid}", json={"edited_text": original})
+    assert r.json()["edited_text"] is None  # identical to generated = no edit
 
     client.patch(f"/projects/{project_id}/ux-prompts/{pid}", json={"edited_text": "again"})
     assert client.patch(f"/projects/{project_id}/ux-prompts/{pid}", json={"edited_text": None}).json()["edited_text"] is None
@@ -303,51 +516,54 @@ def test_edit_reset_and_regenerate(client, project_id, llm):
     client.patch(f"/projects/{project_id}/ux-prompts/{pid}", json={"edited_text": "before regenerate"})
     r = client.post(f"/projects/{project_id}/ux-prompts/{pid}/regenerate")
     assert r.status_code == 200, r.text
-    assert r.json()["edited_text"] is None
-    assert llm.call_count == 2
-    assert len(_ai_calls(project_id)) == 2
+    assert r.json()["edited_text"] is None and r.json()["screens"][0]["route"] == "/e1/list"
 
 
-def test_list_and_delete(client, project_id):
+def test_regenerating_a_feature_does_not_count_its_own_old_screens_as_existing(client, project_id, llm):
     ids = _seed(project_id)
-    pid = _generate(client, project_id, ids).json()["id"]
-    assert [p["id"] for p in client.get(f"/projects/{project_id}/ux-prompts").json()] == [pid]
-
-    assert client.delete(f"/projects/{project_id}/ux-prompts/{pid}").status_code == 204
-    assert client.get(f"/projects/{project_id}/ux-prompts").json() == []
-    assert client.delete(f"/projects/{project_id}/ux-prompts/{pid}").status_code == 404
+    _blueprint(client, project_id, ids)
+    pid = _feature(client, project_id, ids).json()["id"]
+    client.post(f"/projects/{project_id}/ux-prompts/{pid}/regenerate")
+    assert "E1 List (/e1/list)" not in llm.prompt_requests()[-1]
 
 
-def test_prompt_of_another_project_is_not_reachable(client, project_id):
+def test_list_other_projects_and_staleness(client, project_id):
     ids = _seed(project_id)
-    pid = _generate(client, project_id, ids).json()["id"]
+    bid = _blueprint(client, project_id, ids).json()["id"]
+    assert [p["id"] for p in client.get(f"/projects/{project_id}/ux-prompts").json()] == [bid]
+
     other = client.post("/projects", json={"name": f"pytest-ux-other-{uuid.uuid4().hex[:8]}"}).json()["id"]
-    assert client.patch(f"/projects/{other}/ux-prompts/{pid}", json={"edited_text": "x"}).status_code == 404
-
-
-def test_prompts_go_stale_when_the_version_is_superseded(client, project_id):
-    ids = _seed(project_id)
-    pid = _generate(client, project_id, ids).json()["id"]
+    assert client.patch(f"/projects/{other}/ux-prompts/{bid}", json={"edited_text": "x"}).status_code == 404
 
     with get_session() as s:
         review.fork_new_version(s, s.query(Document).filter(Document.id == ids["doc"]).one())
-
     prompts = client.get(f"/projects/{project_id}/ux-prompts").json()
-    assert prompts[0]["id"] == pid and prompts[0]["is_stale"] is True
+    assert prompts[0]["is_stale"] is True
     with get_session() as s:
-        assert s.query(UxPrompt).filter(UxPrompt.id == pid).one().is_stale is True
+        assert s.query(UxPrompt).filter(UxPrompt.id == bid).one().is_stale is True
+        assert s.query(Project).filter(Project.id == project_id).one().style_brief is not None
 
 
-def test_style_brief_save_does_not_wipe_design_tokens(client, project_id):
-    ids = _seed(project_id)
-    _generate(client, project_id, ids)  # saves TOKENS
+# ── Reference style extraction endpoint ──────────────────────────────────────
 
-    r = client.put(f"/projects/{project_id}/ux-prompts/style-brief", json={"tone": "calm, precise"})
-    assert r.status_code == 200
-    saved = client.get(f"/projects/{project_id}/ux-prompts/sources").json()["style_brief"]
-    assert saved["tone"] == "calm, precise"
-    assert saved["design_tokens_summary"] == TOKENS
+def test_style_extraction_endpoint_reads_a_page_and_does_not_save(client, project_id, monkeypatch):
+    monkeypatch.setattr(
+        style_reference,
+        "fetch_style_reference",
+        lambda url: {"url": url, "title": "Ref", "style_tags": {"fonts": ["Inter"]}, "notes": []},
+    )
+    # the router imported the name directly, so patch it there too
+    from app.routers import ux_prompts as router_module
 
-    # ...but the PM can replace it explicitly
-    client.put(f"/projects/{project_id}/ux-prompts/style-brief", json={"design_tokens_summary": "PASTED"})
-    assert client.get(f"/projects/{project_id}/ux-prompts/sources").json()["style_brief"]["design_tokens_summary"] == "PASTED"
+    monkeypatch.setattr(router_module, "fetch_style_reference", style_reference.fetch_style_reference)
+    r = client.post(f"/projects/{project_id}/ux-prompts/style-references/extract", json={"url": "https://example.com"})
+    assert r.status_code == 200 and r.json()["style_tags"]["fonts"] == ["Inter"]
+    assert "reference_styles" not in _sources(client, project_id)["style_brief"]
+
+
+def test_style_extraction_endpoint_refuses_internal_addresses(client, project_id):
+    r = client.post(
+        f"/projects/{project_id}/ux-prompts/style-references/extract",
+        json={"url": "http://169.254.170.2/v2/credentials"},
+    )
+    assert r.status_code == 422
