@@ -57,7 +57,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .common import Usage
 
@@ -1032,6 +1032,7 @@ def _repair_empty_epics(
     client,
     model: str,
     extra_context: str = "",
+    validate: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> tuple[dict[str, Any], Usage]:
     """
     Narrow, single-purpose 4th call — used only when the review pass still
@@ -1042,7 +1043,7 @@ def _repair_empty_epics(
     exactly this). Not run unless validation would otherwise fail.
     """
     prompt = _build_repair_prompt(source_text, data, empty_epic_ids, extra_context)
-    return _call_llm(_REPAIR_SYSTEM_PROMPT, prompt, client, model)
+    return _call_llm(_REPAIR_SYSTEM_PROMPT, prompt, client, model, validate=validate)
 
 
 _MAX_REPAIR_ATTEMPTS = 2
@@ -1074,9 +1075,9 @@ def _ensure_nonempty_epics(
         if not empty_epics:
             break
         data, repair_usage = _repair_empty_epics(
-            source_text, data, empty_epics, client, model, extra_context=extra_context
+            source_text, data, empty_epics, client, model, extra_context=extra_context,
+            validate=_extraction_validator(existing_epic_ids),
         )
-        validate_extraction(data, existing_epic_ids=existing_epic_ids)
         usages.append(repair_usage)
     return data, usages
 
@@ -1232,9 +1233,10 @@ def _repair_undersplit_epics(
     client,
     model: str,
     extra_context: str = "",
+    validate: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> tuple[dict[str, Any], Usage]:
     prompt = _build_split_repair_prompt(source_text, data, findings, extra_context)
-    return _call_llm(_SPLIT_REPAIR_SYSTEM_PROMPT, prompt, client, model)
+    return _call_llm(_SPLIT_REPAIR_SYSTEM_PROMPT, prompt, client, model, validate=validate)
 
 
 _MAX_GRANULARITY_REPAIR_ATTEMPTS = 2
@@ -1299,9 +1301,9 @@ def _ensure_story_granularity(
         if not under_split:
             break
         data, repair_usage = _repair_undersplit_epics(
-            source_text, data, under_split, client, model, extra_context=extra_context
+            source_text, data, under_split, client, model, extra_context=extra_context,
+            validate=_extraction_validator(existing_epic_ids),
         )
-        validate_extraction(data, existing_epic_ids=existing_epic_ids)
         usages.append(repair_usage)
     return data, usages
 
@@ -1399,9 +1401,10 @@ def _repair_missing_gaps(
     client,
     model: str,
     extra_context: str = "",
+    validate: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> tuple[dict[str, Any], Usage]:
     prompt = _build_gap_repair_prompt(source_text, data, coverage_audit, extra_context)
-    return _call_llm(_GAP_REPAIR_SYSTEM_PROMPT, prompt, client, model)
+    return _call_llm(_GAP_REPAIR_SYSTEM_PROMPT, prompt, client, model, validate=validate)
 
 
 _MAX_GAP_REPAIR_ATTEMPTS = 2
@@ -1435,9 +1438,9 @@ def _ensure_gap_completeness(
         if len(data.get("gaps", [])) >= expected:
             break
         data, repair_usage = _repair_missing_gaps(
-            source_text, data, coverage_audit, client, model, extra_context=extra_context
+            source_text, data, coverage_audit, client, model, extra_context=extra_context,
+            validate=_extraction_validator(existing_epic_ids),
         )
-        validate_extraction(data, existing_epic_ids=existing_epic_ids)
         usages.append(repair_usage)
     return data, usages
 
@@ -1507,7 +1510,68 @@ def _create_and_parse_tool_call(make_request, tool_name: str) -> tuple[dict[str,
     ) from last_error
 
 
-def _call_llm(system_prompt: str, prompt: str, client, model: str) -> tuple[dict[str, Any], Usage]:
+_MAX_INVALID_RESPONSE_ATTEMPTS = 3
+
+
+def _extraction_validator(existing_epic_ids: Optional[set[str]] = None) -> Callable[[dict[str, Any]], None]:
+    return lambda data: validate_extraction(data, existing_epic_ids=existing_epic_ids)
+
+
+def _invalid_response_feedback(error: ValueError) -> str:
+    return (
+        "\n\nIMPORTANT: a previous answer to this exact request was rejected by automatic "
+        f"validation with this error:\n{error}\n"
+        "Return the complete extraction again with that fixed. Keep all of its content; only "
+        "make it consistent: every story's epic_id must be the id of an epic declared in your "
+        "epics array (or one of the existing epic ids you were given), and every epic and story "
+        "id must be unique."
+    )
+
+
+def _call_llm(
+    system_prompt: str,
+    prompt: str,
+    client,
+    model: str,
+    validate: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> tuple[dict[str, Any], Usage]:
+    """
+    One record_extraction call. With `validate` (normally validate_extraction
+    via _extraction_validator), a response that parses fine but fails
+    validation is retried with the validation error appended to the prompt,
+    up to _MAX_INVALID_RESPONSE_ATTEMPTS calls in total. Confirmed live: a
+    large staged extraction failed outright on "Story 'S61' references
+    unknown epic_id 'E60'" after several expensive calls had already
+    succeeded. A plain retry would reproduce the same mistake at
+    temperature=0, so the retry tells the model what was wrong. Nothing is
+    patched in code (no invented epics, no stories silently moved): if the
+    model still can't produce a consistent extraction, the error is raised
+    as before. The returned Usage covers every attempt, so the cost log
+    stays accurate.
+    """
+    if validate is None:
+        return _call_llm_once(system_prompt, prompt, client, model)
+
+    usages: list[Usage] = []
+    feedback = ""
+    last_error: Optional[ValueError] = None
+    for _ in range(_MAX_INVALID_RESPONSE_ATTEMPTS):
+        data, usage = _call_llm_once(system_prompt, prompt + feedback, client, model)
+        usages.append(usage)
+        try:
+            validate(data)
+        except ValueError as e:
+            last_error = e
+            feedback = _invalid_response_feedback(e)
+            continue
+        return data, _combine_usage(*usages)
+    raise ValueError(
+        f"{last_error} (the model's response still failed validation after "
+        f"{_MAX_INVALID_RESPONSE_ATTEMPTS} attempts)"
+    ) from last_error
+
+
+def _call_llm_once(system_prompt: str, prompt: str, client, model: str) -> tuple[dict[str, Any], Usage]:
     def make_request():
         return client.chat.completions.create(
             model=model,
@@ -2277,17 +2341,17 @@ def extract_requirements(
         f"{text}\n\n"
         f"{_shared_instructions()}"
     )
-    draft, draft_usage = _call_llm(SYSTEM_PROMPT, prompt, client, model)
     # Lenient here — the draft is an intermediate product the review pass can
     # still fix (e.g. by adding a missing story to an epic it created); only
     # the final output is held to the hard "no empty epics" rule.
-    validate_extraction(draft)
+    draft, draft_usage = _call_llm(SYSTEM_PROMPT, prompt, client, model, validate=_extraction_validator())
 
     coverage_audit, audit_usage = _call_coverage_audit(text, draft, client, model)
 
     review_prompt = _build_review_prompt(text, draft, coverage_audit)
-    reviewed, review_usage = _call_llm(REVIEW_SYSTEM_PROMPT, review_prompt, client, model)
-    validate_extraction(reviewed)
+    reviewed, review_usage = _call_llm(
+        REVIEW_SYSTEM_PROMPT, review_prompt, client, model, validate=_extraction_validator()
+    )
     usages = [draft_usage, audit_usage, review_usage]
 
     reviewed, repair_usages = _ensure_nonempty_epics(text, reviewed, client, model)
@@ -2338,8 +2402,9 @@ def extract_change_request(
         "ones above.\n\n"
         f"{_shared_instructions()}"
     )
-    draft, draft_usage = _call_llm(SYSTEM_PROMPT, prompt, client, model)
-    validate_extraction(draft, existing_epic_ids=existing_epic_ids)
+    draft, draft_usage = _call_llm(
+        SYSTEM_PROMPT, prompt, client, model, validate=_extraction_validator(existing_epic_ids)
+    )
 
     coverage_audit, audit_usage = _call_coverage_audit(text, draft, client, model)
 
@@ -2350,8 +2415,9 @@ def extract_change_request(
         f"{existing_block}\n\n"
     )
     review_prompt = _build_review_prompt(text, draft, coverage_audit, review_extra_context)
-    reviewed, review_usage = _call_llm(REVIEW_SYSTEM_PROMPT, review_prompt, client, model)
-    validate_extraction(reviewed, existing_epic_ids=existing_epic_ids)
+    reviewed, review_usage = _call_llm(
+        REVIEW_SYSTEM_PROMPT, review_prompt, client, model, validate=_extraction_validator(existing_epic_ids)
+    )
     usages = [draft_usage, audit_usage, review_usage]
 
     reviewed, repair_usages = _ensure_nonempty_epics(
@@ -2575,10 +2641,14 @@ def _build_policy_repair_prompt(data: dict[str, Any], uncovered_policies: list[t
 
 
 def _repair_missing_policy_coverage(
-    data: dict[str, Any], uncovered_policies: list[tuple[str, str]], client, model: str
+    data: dict[str, Any],
+    uncovered_policies: list[tuple[str, str]],
+    client,
+    model: str,
+    validate: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> tuple[dict[str, Any], Usage]:
     prompt = _build_policy_repair_prompt(data, uncovered_policies)
-    return _call_llm(_POLICY_REPAIR_SYSTEM_PROMPT, prompt, client, model)
+    return _call_llm(_POLICY_REPAIR_SYSTEM_PROMPT, prompt, client, model, validate=validate)
 
 
 _MAX_POLICY_REPAIR_ATTEMPTS = 2
@@ -2608,8 +2678,9 @@ def ensure_standing_policy_coverage(
         uncovered_policies = [(title, text) for title, text in policies if title in uncovered_titles]
         if not uncovered_policies:
             break
-        data, repair_usage = _repair_missing_policy_coverage(data, uncovered_policies, client, model)
-        validate_extraction(data, existing_epic_ids=existing_epic_ids)
+        data, repair_usage = _repair_missing_policy_coverage(
+            data, uncovered_policies, client, model, validate=_extraction_validator(existing_epic_ids)
+        )
         usages.append(repair_usage)
     return data, usages
 

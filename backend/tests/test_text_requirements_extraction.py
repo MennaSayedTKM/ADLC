@@ -248,6 +248,119 @@ def test_call_llm_raises_after_exhausting_retries_on_persistent_malformed_json()
     assert call_count["n"] == 3  # _MAX_MALFORMED_RESPONSE_ATTEMPTS
 
 
+# A well-formed response can still be inconsistent: confirmed live, a large
+# staged extraction failed on "Story 'S61' references unknown epic_id 'E60'".
+# _call_llm(validate=...) retries such a response with the validation error in
+# the prompt instead of failing the whole extraction on the first one.
+
+DANGLING_EPIC_EXTRACTION = {
+    **VALID_FRESH_EXTRACTION,
+    "user_stories": VALID_FRESH_EXTRACTION["user_stories"] + [
+        {
+            "id": "S61",
+            "epic_id": "E60",
+            "title": "Export scorecards",
+            "description": "As a strategy officer, I want to export scorecards.",
+            "acceptance_criteria": [{"text": "A PDF is produced.", "out_of_scope": False}],
+        }
+    ],
+}
+
+
+def _scripted_client(responses: list[dict], prompts: list[str]):
+    """Serves record_extraction calls from `responses` in order (the last one
+    repeats), records each call's user prompt, and answers the plain-text
+    coverage audit and the granularity audit like _fake_client does."""
+    client = SimpleNamespace()
+    served = {"n": 0}
+
+    def create(**kwargs):
+        tool_choice = kwargs.get("tool_choice")
+        name = tool_choice["function"]["name"] if tool_choice else None
+        if name == "record_granularity_audit":
+            return _fake_response({"epic_findings": []}, tool_name=name)
+        if name != "record_extraction":
+            return _fake_response({}, tool_name="none")
+        prompts.append(kwargs["messages"][-1]["content"])
+        data = responses[min(served["n"], len(responses) - 1)]
+        served["n"] += 1
+        return _fake_response(data)
+
+    client.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
+    return client
+
+
+def test_call_llm_retries_an_inconsistent_response_with_the_validation_error():
+    prompts: list[str] = []
+    client = _scripted_client([DANGLING_EPIC_EXTRACTION, VALID_FRESH_EXTRACTION], prompts)
+
+    data, usage = _call_llm(
+        "system prompt", "user prompt", client, "gpt-4o", validate=lambda d: validate_extraction(d)
+    )
+
+    assert data == VALID_FRESH_EXTRACTION
+    assert len(prompts) == 2
+    assert prompts[0] == "user prompt"
+    assert prompts[1].startswith("user prompt")
+    assert "Story 'S61' references unknown epic_id 'E60'" in prompts[1]
+    # both attempts are billed, so both belong in the cost log
+    assert usage.prompt_tokens == 2000
+    assert usage.completion_tokens == 800
+
+
+def test_call_llm_gives_up_on_a_persistently_inconsistent_response():
+    prompts: list[str] = []
+    client = _scripted_client([DANGLING_EPIC_EXTRACTION], prompts)
+
+    with pytest.raises(ValueError, match="Story 'S61' references unknown epic_id 'E60'"):
+        _call_llm("system prompt", "user prompt", client, "gpt-4o", validate=lambda d: validate_extraction(d))
+
+    assert len(prompts) == 3  # _MAX_INVALID_RESPONSE_ATTEMPTS
+
+
+def test_call_llm_without_a_validator_does_not_validate():
+    prompts: list[str] = []
+    client = _scripted_client([DANGLING_EPIC_EXTRACTION], prompts)
+
+    data, _usage = _call_llm("system prompt", "user prompt", client, "gpt-4o")
+
+    assert data == DANGLING_EPIC_EXTRACTION
+    assert len(prompts) == 1
+
+
+def test_extract_requirements_recovers_when_the_review_pass_returns_a_dangling_epic_id():
+    prompts: list[str] = []
+    # draft OK, review references an undeclared epic once, then corrects itself
+    client = _scripted_client(
+        [VALID_FRESH_EXTRACTION, DANGLING_EPIC_EXTRACTION, VALID_FRESH_EXTRACTION], prompts
+    )
+
+    data, _usage = extract_requirements("text", client, model="gpt-4o")
+
+    assert data == VALID_FRESH_EXTRACTION
+    assert len(prompts) == 3
+    assert "unknown epic_id 'E60'" not in prompts[1]
+    assert "unknown epic_id 'E60'" in prompts[2]
+
+
+def test_extract_change_request_retries_with_existing_epic_ids_still_allowed():
+    prompts: list[str] = []
+    attaches_to_baseline = {
+        "epics": [],
+        "user_stories": [{**VALID_FRESH_EXTRACTION["user_stories"][0], "epic_id": "E2"}],
+        "gaps": [],
+    }
+    dangling = {**attaches_to_baseline, "user_stories": DANGLING_EPIC_EXTRACTION["user_stories"][1:]}
+    client = _scripted_client([dangling, attaches_to_baseline], prompts)
+
+    data, _usage = extract_change_request(
+        "CR text", [ExistingEpic(external_id="E2", title="Baseline")], client, model="gpt-4o"
+    )
+
+    assert data == attaches_to_baseline
+    assert "unknown epic_id 'E60'" in prompts[1]
+
+
 def test_extract_requirements_rejects_invalid_model_output():
     bad = {"epics": [], "user_stories": [{"id": "S1", "epic_id": "MISSING", "title": "x", "description": "x", "acceptance_criteria": []}], "gaps": []}
     client = _fake_client(bad)
@@ -467,10 +580,12 @@ def test_extract_requirements_validates_the_reviewed_output_too():
         "user_stories": [{"id": "S1", "epic_id": "MISSING", "title": "x", "description": "x", "acceptance_criteria": []}],
         "gaps": [],
     }
-    client, _calls = _sequenced_client([VALID_FRESH_EXTRACTION, VALID_FRESH_EXTRACTION, bad_review_output])
+    # draft, coverage audit, then every review attempt stays invalid
+    client, calls = _sequenced_client([VALID_FRESH_EXTRACTION, VALID_FRESH_EXTRACTION] + [bad_review_output] * 3)
 
     with pytest.raises(ValueError, match="unknown epic_id"):
         extract_requirements("some SOW text", client, model="gpt-4o")
+    assert calls["n"] == 5  # draft + audit + 3 review attempts (_MAX_INVALID_RESPONSE_ATTEMPTS)
 
 
 # --- generate_item_draft() ---
