@@ -85,6 +85,20 @@ style_fetch_max_stylesheets: 6
 style_fetch_max_redirects: 4
 style_fetch_user_agent: "TKMiND-StyleReader/1.0 (+design reference lookup)"
 
+# ── Use-case diagrams (business requirements document) ──────────────────────
+# One UML use-case diagram per story, generated automatically at export time
+# and cached by story content. The model returns structured actors/use cases;
+# our code writes the PlantUML text, which PlantUML renders locally to PNG
+# (nothing is sent to an outside rendering service). If PlantUML/Java isn't
+# installed, exports simply omit the diagrams.
+use_case_model: gpt-4o
+use_case_max_tokens: 1200
+use_case_concurrency: 4            # parallel model calls while generating a document's diagrams
+plantuml_jar: tools/plantuml.jar   # relative to the repo root; env PLANTUML_JAR overrides ("" disables)
+java_command: java
+plantuml_render_timeout_seconds: 120
+plantuml_dpi: 150
+
 # ── GPT-4o cost estimation (for ai_calls logging) ────────────────────────────
 # USD per 1,000,000 tokens. Update when OpenAI changes pricing.
 gpt4o_input_cost_per_million: 2.50

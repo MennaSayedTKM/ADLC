@@ -74,6 +74,16 @@ STYLE_FETCH_MAX_STYLESHEETS = int(_require("style_fetch_max_stylesheets"))
 STYLE_FETCH_MAX_REDIRECTS = int(_require("style_fetch_max_redirects"))
 STYLE_FETCH_USER_AGENT = str(_require("style_fetch_user_agent"))
 
+
+# Use-case diagrams
+USE_CASE_MODEL = str(_require("use_case_model"))
+USE_CASE_MAX_TOKENS = int(_require("use_case_max_tokens"))
+USE_CASE_CONCURRENCY = int(_require("use_case_concurrency"))
+PLANTUML_JAR = str(_require("plantuml_jar"))
+JAVA_COMMAND = str(_require("java_command"))
+PLANTUML_RENDER_TIMEOUT_SECONDS = int(_require("plantuml_render_timeout_seconds"))
+PLANTUML_DPI = int(_require("plantuml_dpi"))
+
 # GPT-4o cost estimation
 GPT4O_INPUT_COST_PER_MILLION = float(_require("gpt4o_input_cost_per_million"))
 GPT4O_OUTPUT_COST_PER_MILLION = float(_require("gpt4o_output_cost_per_million"))

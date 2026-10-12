@@ -257,10 +257,28 @@ class AiCall(Base):
             "call_type in ('extraction','alignment','rerank','crop','synthesis',"
             "'suggestions','item_draft','intake_transcription','clarifying_questions',"
             "'policy_coverage','source_material_review','output_story_review',"
-            "'artifact_quality_review','embedding','ux_prompt')",
+            "'artifact_quality_review','embedding','ux_prompt','use_case_diagram')",
             name="ck_ai_calls_call_type",
         ),
     )
+
+
+class UseCaseDiagram(Base):
+    """
+    Cached UML use-case diagram for one story's content — see
+    services/use_case_diagrams.py. Keyed by a hash of the story's content (and
+    the system name), not by item id: a new requirements version copies
+    unchanged stories under new ids, and an edited story hashes differently, so
+    reuse and staleness both fall out of the key. `spec` is the model's
+    structured output; `plantuml` is the text our code built from it.
+    """
+
+    __tablename__ = "use_case_diagrams"
+
+    content_hash = Column(String, primary_key=True)
+    spec = Column(JSON, nullable=False)
+    plantuml = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
 
 
 class UxPrompt(Base):

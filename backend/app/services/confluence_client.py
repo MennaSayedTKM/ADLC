@@ -78,6 +78,19 @@ class ConfluenceClient:
         }
         return self._request("PUT", f"/content/{page_id}", json=payload)
 
+    def attach_file(self, page_id: str, filename: str, data: bytes, content_type: str = "image/png") -> None:
+        """Uploads (or replaces) an attachment on a page — used for the
+        use-case diagram images the page body references by filename."""
+        response = requests.post(
+            f"{self.base_url}/rest/api/content/{page_id}/child/attachment",
+            auth=self._auth,
+            headers={"X-Atlassian-Token": "no-check", "Accept": "application/json"},
+            files={"file": (filename, data, content_type)},
+            timeout=60,
+        )
+        if not response.ok:
+            raise ConfluenceError(response.status_code, response.text[:1000])
+
     def page_url(self, page: dict[str, Any]) -> str:
         webui = page.get("_links", {}).get("webui", "")
         return f"{self.base_url}{webui}" if webui else self.base_url

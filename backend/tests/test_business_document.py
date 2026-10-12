@@ -14,9 +14,9 @@ def _story(description, **kwargs):
     return RequirementItem(external_id="S1", type="story", text="Title", description=description, **kwargs)
 
 
-# --- story -> business requirement rewording ---
+# --- story -> standard user story + source ---
 
-def test_want_to_becomes_must_be_able_to_with_third_person_value():
+def test_user_story_kept_in_standard_format():
     req = _requirement_from_story(
         "BR-1.1",
         _story(
@@ -25,47 +25,47 @@ def test_want_to_becomes_must_be_able_to_with_third_person_value():
         ),
     )
     assert req.stakeholder == "Startup"
-    assert req.statement == "A startup must be able to create and edit their company profile."
-    assert req.business_value == "The startup can complete their profile at their own pace."
+    assert req.user_story == (
+        "As a startup, I want to create and edit my company profile, "
+        "so that I can complete my profile at my own pace."
+    )
     assert req.description is None
 
 
-def test_i_can_without_benefit():
+def test_user_story_without_benefit_still_parses():
     req = _requirement_from_story("BR-1.1", _story("As a user, I can log in."))
-    assert req.statement == "A user must be able to log in."
-    assert req.business_value is None
-
-
-def test_need_a_thing_becomes_requires_and_i_am_agrees():
-    req = _requirement_from_story(
-        "BR-1.1",
-        _story(
-            "As an administrator, I need an audit log of every approval, "
-            "so that I am able to answer compliance questions."
-        ),
-    )
-    assert req.statement == "An administrator requires an audit log of every approval."
-    assert req.business_value == "The administrator is able to answer compliance questions."
-
-
-def test_benefit_about_someone_else_is_kept_as_is():
-    req = _requirement_from_story(
-        "BR-1.1",
-        _story("As a startup, I want to reorder team members, so that visitors see an accurate team."),
-    )
-    assert req.business_value == "Visitors see an accurate team."
+    assert req.user_story == "As a user, I can log in."
 
 
 def test_non_template_description_is_shown_verbatim():
     req = _requirement_from_story("BR-1.1", _story("Users log in with email and password."))
     assert req.description == "Users log in with email and password."
-    assert req.statement is None and req.stakeholder is None
+    assert req.user_story is None and req.stakeholder is None
 
 
 def test_story_without_description_keeps_only_title():
     req = _requirement_from_story("BR-1.1", _story(None))
     assert req.title == "Title"
-    assert req.statement is None and req.description is None
+    assert req.user_story is None and req.description is None
+
+
+def test_source_per_origin():
+    def source(origin, from_gap=False):
+        return _requirement_from_story("BR-1.1", _story(None, origin=origin), from_gap).source
+
+    assert source("extracted") == "Original requirements"
+    assert source("ai_suggestion") == "AI suggestion"
+    assert source("pm_manual") == "Review"
+    assert source("pm_ai_assisted") == "Review"
+    assert source("pm_ai_assisted", from_gap=True) == "AI gap"
+
+
+def test_story_resolved_from_a_gap_is_sourced_to_the_gap():
+    project, v1, v2, epics, stories, gaps = _fixture()
+    gaps[2].resolved_as_item_id = "s1"
+    bdoc = build_business_document(project, v2, epics, stories, gaps)
+    assert bdoc.areas[0].requirements[0].source == "AI gap"
+    assert bdoc.areas[1].requirements[0].source == "Original requirements"
 
 
 # --- document structure ---
@@ -151,8 +151,9 @@ def test_confluence_page_is_business_document_without_delivery_detail():
     for expected in (
         "1. Overview and Scope",
         "BR-1.1",
-        "A startup must be able to edit their profile.",
-        "Investors see current details.",
+        "Source",
+        "Original requirements",
+        "As a startup, I want to edit my profile, so that investors see current details.",
         "Profile version history",
         "4. Open Issues Requiring Stakeholder Input",
         "High one",

@@ -20,10 +20,12 @@ from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     KeepTogether,
     ListFlowable,
     ListItem,
+    Image,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -351,7 +353,7 @@ def generate_business_pdf(bdoc: BusinessDocument) -> bytes:
             flow.extend(lead + [Paragraph("No requirements recorded for this area.", _BRD_NOTE)])
             lead = []
         for req in area.requirements:
-            flow.append(KeepTogether(lead + [_requirement_block(req), Spacer(1, 8)]))
+            flow.append(KeepTogether(lead + [_requirement_block(req, bdoc.diagrams.get(req.item_id)), Spacer(1, 8)]))
             lead = []
     flow.extend(lead)
 
@@ -436,7 +438,13 @@ def generate_business_pdf(bdoc: BusinessDocument) -> bytes:
     return buf.getvalue()
 
 
-def _requirement_block(req) -> Table:
+def _diagram_flowable(png: bytes, max_width: float, max_height: float = 3.4 * inch) -> Image:
+    width, height = ImageReader(io.BytesIO(png)).getSize()
+    scale = min(max_width / width, max_height / height, 1.0)
+    return Image(io.BytesIO(png), width=width * scale, height=height * scale, hAlign="LEFT")
+
+
+def _requirement_block(req, diagram: bytes | None = None) -> Table:
     """One boxed block per requirement: a tinted [title | Ref S4] header,
     then [label | value] rows. reportlab tables share one set of column
     widths, so the header is a nested table spanning both columns."""
@@ -463,9 +471,9 @@ def _requirement_block(req) -> Table:
 
     body: list[list] = [[header, ""]]
     details = [
+        ("Source", req.source),
         ("Stakeholder", req.stakeholder),
-        ("Requirement", req.statement),
-        ("Business value", req.business_value),
+        ("User story", req.user_story),
         ("Description", req.description),
     ]
     for label, value in details:
@@ -481,6 +489,14 @@ def _requirement_block(req) -> Table:
                     leftIndent=10,
                     bulletFontSize=7,
                 ),
+            ]
+        )
+
+    if diagram:
+        body.append(
+            [
+                Paragraph("Use case diagram", _BRD_CELL_LABEL),
+                _diagram_flowable(diagram, _PAGE_WIDTH - 1.3 * inch - 14),
             ]
         )
 

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..db.models import Document, EvaluationReport, Gap, Project, RequirementItem
 from ..db.session import get_db
-from ..deps import get_confluence_client, get_openai_client
+from ..deps import get_confluence_client, get_openai_client, get_optional_openai_client
 from ..schemas.requirements import (
     AcDraftOut,
     ChangeRequestIngestResponse,
@@ -40,6 +40,7 @@ from ..schemas.requirements import (
 from ..services import confluence_export
 from ..services import requirements_review as review
 from ..services.confluence_client import ConfluenceError
+from ..services import use_case_diagrams
 from ..services.business_document import build_business_document
 from ..services.pdf_export import generate_business_pdf, generate_requirements_pdf
 from ..services.requirements_evaluation import run_evaluation
@@ -619,9 +620,13 @@ def _version_chain(db: Session, doc: Document) -> list[Document]:
     return chain
 
 
-def _business_document_for(db: Session, project: Project, doc: Document):
+def _business_document_for(db: Session, project: Project, doc: Document, llm_client=None):
     epics, stories, gaps = _export_content(db, doc)
-    return build_business_document(project, doc, epics, stories, gaps, _version_chain(db, doc))
+    bdoc = build_business_document(project, doc, epics, stories, gaps, _version_chain(db, doc))
+    # A use-case diagram per story, generated on demand and cached (see
+    # services/use_case_diagrams.py). Empty when PlantUML isn't installed.
+    bdoc.diagrams = use_case_diagrams.ensure_diagrams(db, doc, project, stories, llm_client)
+    return bdoc
 
 
 @router.get("/{doc_id}/export.pdf")
@@ -634,6 +639,7 @@ def export_requirements_pdf(
         "'delivery': epics/stories with scenarios and error handling, for the delivery team.",
     ),
     db: Session = Depends(get_db),
+    llm_client=Depends(get_optional_openai_client),
 ):
     """
     A clean PDF of an approved version. Generated fresh on every request
@@ -650,7 +656,7 @@ def export_requirements_pdf(
 
     safe_name = project.name.replace(" ", "_")
     if format == "business":
-        pdf_bytes = generate_business_pdf(_business_document_for(db, project, doc))
+        pdf_bytes = generate_business_pdf(_business_document_for(db, project, doc, llm_client))
         filename = f"{safe_name}_business_requirements_v{doc.version}.pdf"
     else:
         epics, stories, gaps = _export_content(db, doc)
@@ -669,6 +675,7 @@ def publish_confluence(
     doc_id: str,
     db: Session = Depends(get_db),
     confluence_client=Depends(get_confluence_client),
+    llm_client=Depends(get_optional_openai_client),
 ):
     """
     Publishes an approved version as its own Confluence page — a manual,
@@ -698,7 +705,7 @@ def publish_confluence(
 
     try:
         result = confluence_export.publish_requirements_version(
-            db, confluence_client, project, previous_doc, _business_document_for(db, project, doc)
+            db, confluence_client, project, previous_doc, _business_document_for(db, project, doc, llm_client)
         )
     except ConfluenceError as e:
         raise HTTPException(status_code=502, detail=f"Confluence publish failed: {e.detail}")

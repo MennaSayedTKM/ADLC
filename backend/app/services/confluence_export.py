@@ -15,11 +15,14 @@ version supersedes an already-published one, both pages get a short info
 panel linking to the other, so a reader lands on the right one either way.
 """
 
+import logging
 from typing import Optional
 
 from ..db.models import Document, Project
 from .business_document import BusinessDocument, BusinessRequirement
 from .confluence_client import ConfluenceClient
+
+logger = logging.getLogger(__name__)
 
 _PRIORITY_COLOUR = {"High": "Red", "Medium": "Yellow", "Low": "Grey"}
 _STATUS_COLOUR = {"Draft": "Grey", "In Review": "Yellow", "Approved": "Green"}
@@ -146,7 +149,7 @@ def build_version_page_html(
         if not area.requirements:
             parts.append(_muted("No requirements recorded for this area."))
         for req in area.requirements:
-            parts.append(_requirement_html(req))
+            parts.append(_requirement_html(req, req.item_id in bdoc.diagrams))
 
     # 3. Assumptions & dependencies
     parts.append("<h1>3. Assumptions and Dependencies</h1>")
@@ -206,11 +209,15 @@ def build_version_page_html(
     return "\n".join(parts)
 
 
-def _requirement_html(req: BusinessRequirement) -> str:
+def diagram_filename(req: BusinessRequirement) -> str:
+    return f"use-case-{req.source_id}.png"
+
+
+def _requirement_html(req: BusinessRequirement, has_diagram: bool = False) -> str:
     rows = [
+        ("Source", req.source),
         ("Stakeholder", req.stakeholder),
-        ("Requirement", req.statement),
-        ("Business value", req.business_value),
+        ("User story", req.user_story),
         ("Description", req.description),
     ]
     body = "".join(
@@ -221,6 +228,12 @@ def _requirement_html(req: BusinessRequirement) -> str:
     if req.acceptance_criteria:
         items = "".join(f"<li>{_escape(ac)}</li>" for ac in req.acceptance_criteria)
         body += f'<tr><th style="width:160px;">Acceptance criteria</th><td><ul>{items}</ul></td></tr>'
+    if has_diagram:
+        body += (
+            '<tr><th style="width:160px;">Use case diagram</th><td>'
+            f'<ac:image ac:width="520"><ri:attachment ri:filename="{_escape(diagram_filename(req))}" /></ac:image>'
+            "</td></tr>"
+        )
     ref = f' <span style="color:{_LABEL_COLOUR};font-size:0.8em;font-weight:normal;">Ref {_escape(req.source_id)}</span>'
     title = f"<h3>{_escape(req.ref)}&nbsp;&nbsp;{_escape(req.title)}{ref}</h3>"
     return title + (f"<table><tbody>{body}</tbody></table>" if body else "")
@@ -283,6 +296,18 @@ def publish_requirements_version(
         _unused_title(client, version_page_title(bdoc)), body_html, parent_id=index_meta["index_page_id"]
     )
     page_url = client.page_url(page)
+
+    # The body references each diagram by filename; upload them to the new page.
+    # A failed upload only leaves that image unresolved on the page — it must
+    # not abandon an otherwise-published version.
+    for area in bdoc.areas:
+        for req in area.requirements:
+            png = bdoc.diagrams.get(req.item_id)
+            if png:
+                try:
+                    client.attach_file(page["id"], diagram_filename(req), png)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Could not attach use-case diagram for %s: %s", req.source_id, e)
 
     if previous_page_id:
         # The old page keeps its own original body untouched — only prepend

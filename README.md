@@ -56,6 +56,12 @@ frontend/  React + Vite UI  ──/api/*──►  backend/  FastAPI (port 8080)
 - Node.js 20+
 - An OpenAI API key
 - A running embedding server (see below)
+- Optional, for use-case diagrams in the business requirements PDF / Confluence
+  page: Java 17+, [Graphviz](https://graphviz.org/download/), and
+  `tools/plantuml.jar` (the MIT-licensed build from the
+  [PlantUML releases](https://github.com/plantuml/plantuml/releases), saved as
+  `tools/plantuml.jar`; override the path with `PLANTUML_JAR`). Without them the
+  exports simply omit the diagrams. The Docker image bundles all three.
 
 ## Setup
 
@@ -168,7 +174,10 @@ npm run dev --prefix frontend
 5. **Share** the approved version. **Export PDF** and **Publish to
    Confluence** produce a business requirements document for stakeholders
    (scope, numbered business requirements, assumptions and dependencies,
-   open issues, version history, sign-off). **Delivery PDF** gives the
+   open issues, version history, sign-off). Each requirement shows its user
+   story, its source (original requirements, AI suggestion, AI gap or review)
+   and a UML use-case diagram, generated automatically for every story the
+   first time it is exported and cached after that. **Delivery PDF** gives the
    delivery team the full stories with Given/When/Then scenarios and error
    handling.
 

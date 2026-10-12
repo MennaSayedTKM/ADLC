@@ -64,6 +64,15 @@ def get_openai_client():
     return OpenAI(api_key=key)
 
 
+def get_optional_openai_client():
+    """The OpenAI client, or None when no key is configured — for features
+    that degrade gracefully (use-case diagrams fall back to a plain drawing)."""
+    try:
+        return get_openai_client()
+    except HTTPException:
+        return None
+
+
 def get_anthropic_client():
     from anthropic import Anthropic
 

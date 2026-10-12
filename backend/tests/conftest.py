@@ -27,6 +27,11 @@ os.environ["TKMIND_DB_PATH"] = str(_TEST_DATA_DIR / "test.db")
 # are set before main.py's load_dotenv() runs, which never overrides
 # variables that already exist — so locally and in CI the tests see the
 # same thing: no keys, only the fakes each test installs.
+# Same for diagrams: blank PLANTUML_JAR disables rendering, so a developer
+# with Java installed gets the same (diagram-free) exports as CI. Tests that
+# exercise diagrams stub the renderer explicitly.
+os.environ["PLANTUML_JAR"] = ""
+
 for _secret in (
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",

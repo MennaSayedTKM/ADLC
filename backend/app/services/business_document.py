@@ -6,10 +6,11 @@ Confluence page. The delivery-team layout (stories, Given/When/Then
 scenarios, error messages) is still available as the PDF's "delivery" format.
 
 Built only from what the PM approved: no AI call, nothing added that wasn't
-reviewed. The only rewriting is mechanical — a story's "As a [role], I want
-[capability], so that [benefit]" description is restated in the third person
-("A startup must be able to ...", "The startup can ..."). When a description
-doesn't follow that template it's shown verbatim instead of guessed at.
+reviewed. Each requirement carries its story in the standard user-story form
+("As a [role], I want [capability], so that [benefit]"), exactly as written.
+Descriptions that don't follow the template are shown verbatim instead of
+guessed at. Each requirement also names its source: the original
+requirements, an AI suggestion, an AI-flagged gap, or the PM's review.
 
 Format-neutral on purpose: pdf_export.py and confluence_export.py each render
 the same BusinessDocument, so the two outputs can't drift apart in content.
@@ -31,20 +32,11 @@ _USER_STORY = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# First-person -> third-person, applied after the story's subject has been
-# substituted. Present-tense verbs agree with "they" exactly as with "I",
-# so only am/was/I'm need their own forms.
-_PRONOUNS = [
-    (re.compile(r"\bI am\b"), "they are"),
-    (re.compile(r"\bI'm\b"), "they're"),
-    (re.compile(r"\bI was\b"), "they were"),
-    (re.compile(r"\bI\b"), "they"),
-    (re.compile(r"\bmyself\b"), "themselves"),
-    (re.compile(r"\bmine\b"), "theirs"),
-    (re.compile(r"\bmy\b"), "their"),
-    (re.compile(r"\bMy\b"), "Their"),
-    (re.compile(r"\bme\b"), "them"),
-]
+# Where a requirement came from, shown in each requirement's table.
+SOURCE_ORIGINAL = "Original requirements"
+SOURCE_AI_SUGGESTION = "AI suggestion"
+SOURCE_AI_GAP = "AI gap"
+SOURCE_REVIEW = "Review"
 
 
 @dataclass
@@ -52,9 +44,10 @@ class BusinessRequirement:
     ref: str  # "BR-1.2" — position in this document
     source_id: str  # "S4" — the story's id in TKMiND, for traceability
     title: str
-    stakeholder: Optional[str] = None
-    statement: Optional[str] = None  # "A startup must be able to ..."
-    business_value: Optional[str] = None  # "The startup can ..."
+    item_id: str = ""  # the story's row id, to look up its use-case diagram
+    source: str = SOURCE_ORIGINAL
+    stakeholder: Optional[str] = None  # the "As a [role]" part
+    user_story: Optional[str] = None  # "As a startup, I want ..., so that ..."
     description: Optional[str] = None  # verbatim fallback when the template didn't parse
     acceptance_criteria: list[str] = field(default_factory=list)
 
@@ -108,6 +101,9 @@ class BusinessDocument:
     dependencies: list[AreaNote]
     open_issues: list[OpenIssue]
     version_history: list[VersionEntry]
+    # {story row id: PNG bytes} — use-case diagrams, filled in by the caller
+    # (generating them needs the DB and a model call; this module stays pure).
+    diagrams: dict[str, bytes] = field(default_factory=dict)
 
     @property
     def title(self) -> str:
@@ -129,6 +125,7 @@ def build_business_document(
     """`epics`/`stories` must already exclude pending/dismissed AI
     suggestions. `version_chain` is every version up to and including
     `document`, oldest first; defaults to just `document`."""
+    gap_item_ids = {g.resolved_as_item_id for g in gaps if g.resolved_as_item_id}
     stories_by_epic: dict[Optional[str], list[RequirementItem]] = {}
     for s in stories:
         stories_by_epic.setdefault(s.parent_id, []).append(s)
@@ -149,7 +146,7 @@ def build_business_document(
     for number, (title, source_ref, area_stories, epic) in enumerate(groups, start=1):
         requirements = []
         for n, story in enumerate(area_stories, start=1):
-            req = _requirement_from_story(f"BR-{number}.{n}", story)
+            req = _requirement_from_story(f"BR-{number}.{n}", story, story.id in gap_item_ids)
             for ac in story.acceptance_criteria or []:
                 if ac.get("out_of_scope"):
                     out_of_scope.append(ScopeExclusion(req.ref, ac["text"]))
@@ -222,57 +219,32 @@ def _purpose(doc: BusinessDocument) -> str:
     return text + ". Detailed acceptance scenarios for the delivery team are maintained separately."
 
 
-def _requirement_from_story(ref: str, story: RequirementItem) -> BusinessRequirement:
-    req = BusinessRequirement(ref=ref, source_id=story.external_id, title=story.text)
+def _source_of(story: RequirementItem, from_gap: bool) -> str:
+    if from_gap:
+        return SOURCE_AI_GAP
+    if story.origin == "ai_suggestion":
+        return SOURCE_AI_SUGGESTION
+    if story.origin in ("pm_manual", "pm_ai_assisted"):
+        return SOURCE_REVIEW
+    return SOURCE_ORIGINAL
+
+
+def _requirement_from_story(ref: str, story: RequirementItem, from_gap: bool = False) -> BusinessRequirement:
+    req = BusinessRequirement(
+        ref=ref, source_id=story.external_id, item_id=story.id or "", title=story.text, source=_source_of(story, from_gap)
+    )
     if not story.description:
         return req
 
-    m = _USER_STORY.match(story.description)
+    description = " ".join(story.description.split())
+    m = _USER_STORY.match(description)
     if not m:
-        req.description = story.description.strip()
+        req.description = description
         return req
 
-    article = (m.group("article") or "").lower()
-    role = m.group("role").strip()
-    verb = " ".join(m.group("verb").lower().split())
-    capability = m.group("capability").strip().rstrip(".")
-    benefit = (m.group("benefit") or "").strip().rstrip(".")
-
-    subject = f"{article} {role}" if article else role
-    definite = f"the {role}" if article else role
-
-    # "I can X" / "I should be able to X" / "I want to X" all describe an
-    # ability; "I want/need [something]" describes a thing the role requires.
-    if verb == "should be able" and capability.lower().startswith("to "):
-        capability = capability[3:]
-        verb = "can"
-    elif verb != "can" and re.match(r"(?i)^(to\s+|be\s+able\s+to\s+)", capability):
-        capability = re.sub(r"(?i)^(be\s+able\s+)?to\s+", "", capability)
-        verb = "can"
-
-    req.stakeholder = _capitalize(role)
-    if verb == "can":
-        req.statement = f"{_capitalize(subject)} must be able to {_third_person(capability)}."
-    else:
-        req.statement = f"{_capitalize(subject)} requires {_third_person(capability)}."
-    if benefit:
-        req.business_value = _capitalize(_third_person(benefit, subject=definite)) + "."
+    req.stakeholder = _capitalize(m.group("role").strip())
+    req.user_story = description
     return req
-
-
-def _third_person(text: str, subject: Optional[str] = None) -> str:
-    """Restate first-person story text in the third person. When `subject`
-    is given, the first "I" becomes that subject ("the startup") and later
-    ones become "they"."""
-    if subject:
-        text = re.sub(r"\bI am\b", f"{subject} is", text, count=1)
-        text = re.sub(r"\bI'm\b", f"{subject} is", text, count=1)
-        text = re.sub(r"\bI was\b", f"{subject} was", text, count=1)
-        if subject not in text:
-            text = re.sub(r"\bI\b", subject, text, count=1)
-    for pattern, replacement in _PRONOUNS:
-        text = pattern.sub(replacement, text)
-    return text
 
 
 def _capitalize(text: str) -> str:

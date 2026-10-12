@@ -19,6 +19,12 @@ build brief (historical — some details changed during the build).
   comes from a context pack (tokens, sitemap, screen registry derived from saved prompts,
   components, feature relationship map) built per feature prompt. Prompts live in `ux_prompts`;
   the PM's brief and the blueprint's outputs live in `projects.style_brief`.
+- `backend/app/services/use_case_diagrams.py` — a UML use-case diagram per story in the business
+  requirements document (PDF + Confluence). The model (`ai/text/use_case_generator.py`) returns
+  structured actors/use cases, our code writes the PlantUML text, `plantuml_renderer.py` renders it
+  locally with `java -jar tools/plantuml.jar` (never an outside service). Generated automatically at
+  export time, cached in `use_case_diagrams` by story-content hash. Optional: without Java/the jar
+  exports omit diagrams. Tests blank `PLANTUML_JAR` (conftest) and stub the renderer.
 - `backend/app/services/style_reference.py` — reads a reference website's HTML/CSS (BeautifulSoup)
   into style tags. It fetches a user-supplied URL, so SSRF guards are mandatory (public IPs only,
   80/443 only, per-redirect checks, size/time caps) — keep them and their tests if you touch it.
