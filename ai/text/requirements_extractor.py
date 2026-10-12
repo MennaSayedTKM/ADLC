@@ -43,8 +43,9 @@ a whole mandatory capability section with no signal anywhere in the output
 design didn't catch it either, since the review pass only re-checks the
 draft's own claims, not the source's full inventory of requirements. Once
 the coverage audit was strong enough to catch that, a second problem
-surfaced just as reliably: MIRROR SOURCE STRUCTURE creates an epic per
-source subsection before the model knows whether that subsection is
+surfaced just as reliably: the then-rule MIRROR SOURCE STRUCTURE (since
+replaced by EPIC GROUPING) created an epic per
+source subsection before the model knew whether that subsection was
 story-worthy, and the review pass — despite an explicit instruction to
 delete any leftover empty shell — kept leaving out-of-scope subsections'
 epics in place empty rather than deleting them. The repair call exists
@@ -54,12 +55,15 @@ a call with no other job.
 """
 
 import json
+import logging
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .common import Usage
+
+logger = logging.getLogger(__name__)
 
 # OpenAI's structured-output JSON has been observed to occasionally
 # truncate a `\uXXXX` escape for a smart-punctuation character down to just
@@ -110,7 +114,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from config import EXTRACTION_MODEL, EXTRACTION_MAX_TOKENS  # noqa: E402
+from config import (  # noqa: E402
+    EPIC_CONSOLIDATION_MIN_EPICS,
+    EPIC_TARGET_MAX_STORIES,
+    EPIC_TARGET_MIN_STORIES,
+    EXTRACTION_MAX_TOKENS,
+    EXTRACTION_MODEL,
+)
 
 SYSTEM_PROMPT = (
     "You are a senior Business Analyst and Product Owner with over a decade of experience "
@@ -290,9 +300,9 @@ def _shared_instructions() -> str:
         "A story whose only acceptance criterion is a vague restatement of its own title "
         "(\"X is fully configured and approved\") is under-specified regardless of how many "
         "stories it's split across — decompose its criteria, not necessarily the story "
-        "itself. And \"one epic per subsection\" (see MIRROR SOURCE STRUCTURE below) is an "
-        "epic-level rule only — it never implies \"one story per subsection\"; the story "
-        "count inside an epic is decided purely by the top-level bullet count above.\n\n"
+        "itself. And EPIC GROUPING below is an epic-level rule only — it never changes the "
+        "story count; the story count for each subsection an epic draws from is decided "
+        "purely by the top-level bullet count above.\n\n"
         "BULLET-LEVEL FIDELITY:\n"
         "When a subsection lists several distinct sub-behaviors — each its own bullet or "
         "sub-bullet, e.g. \"configure baselines, targets, and thresholds\", \"configure "
@@ -324,16 +334,25 @@ def _shared_instructions() -> str:
         "list — resist that. A story needs both: the bullet-literal scenarios this section "
         "asks for, and the standard elaboration ones, together, not a trade-off between "
         "them.\n\n"
-        "MIRROR SOURCE STRUCTURE:\n"
-        "If the document organizes its scope into its own numbered or lettered subsections "
-        "(e.g. \"4.1.A\", \"Section 3.2\", \"Module B\"), use that structure as scaffolding "
-        "for your epic grouping — one epic per named subsection/module the source itself "
-        "defines, rather than inventing your own grouping from scratch. If the document has "
-        "no such structure (a flat narrative CR, for instance), group by cohesive capability "
-        "as described above instead. This is scaffolding for subsections that DO describe "
-        "platform behavior — it is not a license to create an epic for every subsection "
-        "regardless of content; see WHAT NOT TO TURN INTO STORIES below, which overrides "
-        "this when they conflict.\n\n"
+        "EPIC GROUPING:\n"
+        "An epic is a functional module or feature area of the platform — the unit a "
+        f"delivery team plans a release around — and normally holds {EPIC_TARGET_MIN_STORIES}–"
+        f"{EPIC_TARGET_MAX_STORIES} stories. Use the document's own structure to see which "
+        "module content belongs to, but do NOT create one epic per numbered section: long "
+        "documents (an RFP or tender with dozens of numbered sections) spread one module "
+        "across several short sections, and mirroring them one-to-one produces dozens of "
+        "one-story epics, which is wrong. Group sibling or related sections that describe "
+        "the same capability area into one epic (e.g. separate sections on application "
+        "intake, eligibility screening and evaluation scoring are one \"Funding Application "
+        "& Evaluation\" epic), give it a module-level title, and list every section it draws "
+        "from in its source_reference (e.g. \"Sections 18–21\"). Where the document already "
+        "defines a few large modules (e.g. \"4.1.A\", \"Module B\"), those are natural epics; "
+        "a flat narrative document (a CR, for instance) is grouped by cohesive capability. "
+        "A genuinely separate module still gets its own epic even if it yields fewer stories "
+        "than the range above — the range guides grouping; it is never a reason to merge "
+        "unrelated capabilities or to split or merge stories. Only sections that DO describe "
+        "platform behavior take part in this; see WHAT NOT TO TURN INTO STORIES below, which "
+        "overrides this when they conflict.\n\n"
         "WHAT NOT TO TURN INTO STORIES:\n"
         "EVERY EPIC YOU CREATE MUST HAVE AT LEAST ONE STORY. This is a hard rule, not "
         "guidance — there is no valid, correct output where an epic exists with zero "
@@ -349,6 +368,21 @@ def _shared_instructions() -> str:
         "training/enablement/knowledge-transfer — these describe how the delivery team does "
         "its job, not what the platform does → do not create an epic for it at all, not "
         "even an empty one to acknowledge you saw it.\n"
+        "  (c) It's ABOUT the procurement or the engagement rather than about what the "
+        "platform does — common in RFPs and tenders: proposal or submission instructions and "
+        "formats (technical proposal, commercial/financial proposal, bidder or vendor "
+        "qualifications, evaluation and award criteria), project risks and mitigations, "
+        "project-level assumptions and dependencies, acceptance criteria for the engagement "
+        "as a whole, KPIs or success measures for the project itself, expected outcomes or "
+        "benefits, timelines, milestones and payment terms → do not create an epic or a "
+        "story for it. Use its content where it belongs instead: an assumption or dependency "
+        "that bears on a specific capability goes into that epic's assumptions/dependencies; "
+        "a risk or open point that needs a client/PM decision becomes a gap; a concrete, "
+        "measurable target the platform itself must meet or enforce becomes acceptance "
+        "criteria on the story it constrains. Careful with names: a section describing KPI "
+        "features the platform provides to its users (defining KPIs, targets, dashboards) is "
+        "platform behavior, case (a); a section listing KPIs that measure whether the "
+        "PROJECT succeeded is case (c).\n"
         "If you are ever tempted to create an epic without immediately writing at least one "
         "real story for it, that hesitation itself is the signal that the subsection is "
         "actually case (b) — resolve it by not creating the epic, never by creating an "
@@ -734,7 +768,12 @@ REVIEW_SYSTEM_PROMPT = (
     "(\"the feature works well\" is not acceptable) — tighten it.\n"
     "4) INCONSISTENT GROUPING — a story that's really two unrelated capabilities bundled "
     "together, or several stories that are really one capability needlessly split apart, "
-    "per the granularity rules you were given the first time.\n"
+    "per the granularity rules you were given the first time. At the epic level: epics "
+    "that just mirror individual numbered sections, each holding one or two stories, "
+    "where several of them belong to the same module — merge them into one module-level "
+    "epic per EPIC GROUPING (moving their stories unchanged), and delete any epic that is "
+    "really about the procurement or engagement (case (c) of WHAT NOT TO TURN INTO "
+    "STORIES) rather than about the platform.\n"
     "5) MISSING SCENARIO COVERAGE — a story whose scenarios skip a category that clearly "
     "applies to it (e.g. a story about a configuration form with no required-field "
     "validation scenario at all).\n"
@@ -858,7 +897,11 @@ COVERAGE_AUDIT_SYSTEM_PROMPT = (
     "one-clause reason. This includes: workshops and stakeholder-facilitation activities, "
     "producing a document/deliverable (BRD, RTM, register, catalog, handbook, data "
     "dictionary) as a service activity, data discovery/preparation/migration work, "
-    "training/enablement/knowledge-transfer, deliverables lists, sections the document "
+    "training/enablement/knowledge-transfer, deliverables lists, sections about the "
+    "procurement or engagement rather than the platform (proposal/submission "
+    "instructions, bidder qualifications, evaluation criteria, project risks, "
+    "project-level assumptions, success KPIs or expected outcomes of the project, "
+    "timelines and payment terms), sections the document "
     "itself marks out of scope, and non-functional/SLA/governance content that genuinely "
     "applies to the system this document IS about (uptime targets, RTO/RPO, access "
     "control, audit logging FOR THIS PLATFORM). A section being OUT OF SCOPE is a "
@@ -1080,6 +1123,210 @@ def _ensure_nonempty_epics(
         )
         usages.append(repair_usage)
     return data, usages
+
+
+# --- Epic consolidation ---
+#
+# Confirmed live against a ~74-section RFP: the extraction mirrored the
+# document's numbered sections one-to-one into 66 epics of 1-3 stories each.
+# The EPIC GROUPING prompt rule now asks for module-level epics, but — like
+# every other "just don't do X" rule in this file — that alone isn't relied
+# on. When the finished extraction still has many thin epics, one narrow call
+# regroups them. It returns only a story → epic mapping plus the new epic
+# headers; our code applies it, so story content can't be dropped or
+# rewritten, and the output stays small however many stories there are.
+
+_EPIC_CONSOLIDATION_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "epics": _EXTRACTION_PARAMETERS["properties"]["epics"],
+        "story_assignments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "story_id": {"type": "string"},
+                    "epic_id": {"type": "string"},
+                },
+                "required": ["story_id", "epic_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["epics", "story_assignments"],
+    "additionalProperties": False,
+}
+
+_EPIC_CONSOLIDATION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "record_epic_grouping",
+        "description": "Record the module-level epics and which epic each story belongs to.",
+        "parameters": _EPIC_CONSOLIDATION_PARAMETERS,
+        "strict": True,
+    },
+}
+
+EPIC_CONSOLIDATION_SYSTEM_PROMPT = (
+    "You are the same senior Business Analyst, fixing one narrow defect in a finished "
+    "requirements extraction: it has too many thin epics, typically one per numbered "
+    "section of a long document. The stories themselves are fine and are not yours to "
+    "change. Your only job is to group them into module-level epics.\n\n"
+    "An epic is a functional module or feature area of the platform — the unit a delivery "
+    f"team plans a release around — normally holding {EPIC_TARGET_MIN_STORIES}–"
+    f"{EPIC_TARGET_MAX_STORIES} stories. Merge epics whose stories belong to the same module "
+    "or capability area. A genuinely separate module may keep its own epic with fewer "
+    "stories; never merge unrelated capabilities just to reach the range.\n\n"
+    "Rules:\n"
+    "- Assign EVERY story listed, exactly once, by its exact id. You cannot add, remove, "
+    "split, merge or rename stories — you only choose each story's epic.\n"
+    "- Every epic you return must have at least one story assigned to it.\n"
+    "- Give each epic a short, module-level title. Its source_reference lists every source "
+    "section of the epics merged into it (e.g. \"Sections 18–21\"). Carry over the "
+    "assumptions and dependencies of the epics merged into it, dropping exact duplicates "
+    "only.\n"
+    "- Give your epics ids \"E1\", \"E2\", ... in the order you list them, unless told "
+    "below that some ids are reserved.\n"
+)
+
+
+def _needs_epic_consolidation(data: dict[str, Any]) -> bool:
+    """Many epics averaging fewer than EPIC_TARGET_MIN_STORIES stories — the
+    signature of section-mirroring. Only the epics this extraction declared
+    count; stories attached to a change request's baseline epics don't."""
+    epic_ids = {e["id"] for e in data["epics"]}
+    if len(epic_ids) < EPIC_CONSOLIDATION_MIN_EPICS:
+        return False
+    stories = sum(1 for s in data["user_stories"] if s["epic_id"] in epic_ids)
+    return stories / len(epic_ids) < EPIC_TARGET_MIN_STORIES
+
+
+def _build_epic_consolidation_prompt(
+    epics: list[dict[str, Any]], stories: list[dict[str, Any]], reserved_epic_ids: set[str]
+) -> str:
+    story_summaries = [
+        {"id": s["id"], "epic_id": s["epic_id"], "title": s["title"], "description": s["description"]}
+        for s in stories
+    ]
+    reserved = (
+        f"These epic ids are reserved by the project's existing epics; do not use them: "
+        f"{sorted(reserved_epic_ids)!r}\n\n"
+        if reserved_epic_ids
+        else ""
+    )
+    return (
+        f"Current epics ({len(epics)}):\n{json.dumps(epics, indent=2)}\n\n"
+        f"Stories ({len(stories)}):\n{json.dumps(story_summaries, indent=2)}\n\n"
+        f"{reserved}"
+        "Regroup these stories into module-level epics per your instructions."
+    )
+
+
+def _check_epic_consolidation(
+    result: dict[str, Any], story_ids: set[str], reserved_epic_ids: set[str]
+) -> None:
+    epic_ids: set[str] = set()
+    for epic in result["epics"]:
+        if epic["id"] in epic_ids or epic["id"] in reserved_epic_ids:
+            raise ValueError(f"Epic id {epic['id']!r} is used twice or is reserved")
+        epic_ids.add(epic["id"])
+
+    assigned: dict[str, str] = {}
+    for a in result["story_assignments"]:
+        if a["story_id"] not in story_ids:
+            raise ValueError(f"Story id {a['story_id']!r} is not one of the stories given")
+        if a["story_id"] in assigned:
+            raise ValueError(f"Story {a['story_id']!r} is assigned more than once")
+        if a["epic_id"] not in epic_ids:
+            raise ValueError(f"Story {a['story_id']!r} is assigned to undeclared epic {a['epic_id']!r}")
+        assigned[a["story_id"]] = a["epic_id"]
+
+    missing = story_ids - assigned.keys()
+    if missing:
+        raise ValueError(f"Stories {sorted(missing)!r} are not assigned to any epic")
+    empty = epic_ids - set(assigned.values())
+    if empty:
+        raise ValueError(f"Epics {sorted(empty)!r} have no story assigned")
+
+
+def _epic_consolidation_feedback(error: ValueError) -> str:
+    return (
+        "\n\nIMPORTANT: a previous answer to this exact request was rejected with this "
+        f"error:\n{error}\n"
+        "Return the grouping again with that fixed: every story listed above assigned exactly "
+        "once to an epic you declare, and every declared epic with at least one story."
+    )
+
+
+def _apply_epic_consolidation(
+    data: dict[str, Any], result: dict[str, Any], reserved_epic_ids: set[str]
+) -> dict[str, Any]:
+    """New epics get ids E1, E2, ... in the order returned (skipping reserved
+    ids); only the regrouped stories' epic_id changes."""
+    taken = set(reserved_epic_ids)
+    id_map: dict[str, str] = {}
+    n = 1
+    epics = []
+    for epic in result["epics"]:
+        while f"E{n}" in taken:
+            n += 1
+        taken.add(f"E{n}")
+        id_map[epic["id"]] = f"E{n}"
+        epics.append({**epic, "id": f"E{n}"})
+
+    new_epic_of = {a["story_id"]: id_map[a["epic_id"]] for a in result["story_assignments"]}
+    stories = [
+        {**s, "epic_id": new_epic_of[s["id"]]} if s["id"] in new_epic_of else s
+        for s in data["user_stories"]
+    ]
+    return {**data, "epics": epics, "user_stories": stories}
+
+
+def _ensure_epic_consolidation(
+    data: dict[str, Any],
+    client,
+    model: str,
+    existing_epic_ids: Optional[set[str]] = None,
+) -> tuple[dict[str, Any], list[Usage]]:
+    """
+    One regrouping call, only when _needs_epic_consolidation(). Runs last,
+    after the granularity and gap repairs: _looks_already_well_split skips the
+    granularity audit once every epic has 2+ stories, so merging earlier
+    would hide under-split sections from it. Grouping is an improvement, not
+    a correctness requirement, so if the model can't produce a valid grouping
+    the extraction is kept as it was rather than failing the PM's request.
+    """
+    usages: list[Usage] = []
+    if not _needs_epic_consolidation(data):
+        return data, usages
+
+    reserved = existing_epic_ids or set()
+    epic_ids = {e["id"] for e in data["epics"]}
+    stories = [s for s in data["user_stories"] if s["epic_id"] in epic_ids]
+    story_ids = {s["id"] for s in stories}
+    prompt = _build_epic_consolidation_prompt(data["epics"], stories, reserved)
+    try:
+        result, usage = _call_until_valid(
+            lambda p: _call_with_tool(
+                EPIC_CONSOLIDATION_SYSTEM_PROMPT, p, client, model,
+                _EPIC_CONSOLIDATION_TOOL, "record_epic_grouping",
+            ),
+            prompt,
+            lambda r: _check_epic_consolidation(r, story_ids, reserved),
+            _epic_consolidation_feedback,
+        )
+    except InvalidModelResponseError as e:
+        logger.warning("Epic consolidation skipped, keeping the original epics: %s", e)
+        usages.append(e.usage)
+        return data, usages
+    except ValueError as e:  # malformed tool call after its own retries
+        logger.warning("Epic consolidation skipped, keeping the original epics: %s", e)
+        return data, usages
+
+    usages.append(usage)
+    consolidated = _apply_epic_consolidation(data, result, reserved)
+    validate_extraction(consolidated, existing_epic_ids=existing_epic_ids, require_nonempty_epics=True)
+    return consolidated, usages
 
 
 _GRANULARITY_AUDIT_PARAMETERS = {
@@ -1551,23 +1798,49 @@ def _call_llm(
     """
     if validate is None:
         return _call_llm_once(system_prompt, prompt, client, model)
+    return _call_until_valid(
+        lambda p: _call_llm_once(system_prompt, p, client, model),
+        prompt,
+        validate,
+        _invalid_response_feedback,
+    )
 
+
+class InvalidModelResponseError(ValueError):
+    """Raised by _call_until_valid; `usage` covers every attempt, so a caller
+    that recovers from the failure can still log what the attempts cost."""
+
+    def __init__(self, message: str, usage: Usage):
+        super().__init__(message)
+        self.usage = usage
+
+
+def _call_until_valid(
+    call: Callable[[str], tuple[dict[str, Any], Usage]],
+    prompt: str,
+    validate: Callable[[dict[str, Any]], None],
+    feedback: Callable[[ValueError], str],
+) -> tuple[dict[str, Any], Usage]:
+    """Calls call(prompt); while validate() rejects the result, calls again
+    with feedback(error) appended to the prompt, up to
+    _MAX_INVALID_RESPONSE_ATTEMPTS calls in total."""
     usages: list[Usage] = []
-    feedback = ""
+    suffix = ""
     last_error: Optional[ValueError] = None
     for _ in range(_MAX_INVALID_RESPONSE_ATTEMPTS):
-        data, usage = _call_llm_once(system_prompt, prompt + feedback, client, model)
+        data, usage = call(prompt + suffix)
         usages.append(usage)
         try:
             validate(data)
         except ValueError as e:
             last_error = e
-            feedback = _invalid_response_feedback(e)
+            suffix = feedback(e)
             continue
         return data, _combine_usage(*usages)
-    raise ValueError(
+    raise InvalidModelResponseError(
         f"{last_error} (the model's response still failed validation after "
-        f"{_MAX_INVALID_RESPONSE_ATTEMPTS} attempts)"
+        f"{_MAX_INVALID_RESPONSE_ATTEMPTS} attempts)",
+        _combine_usage(*usages),
     ) from last_error
 
 
@@ -2363,6 +2636,9 @@ def extract_requirements(
     reviewed, gap_repair_usages = _ensure_gap_completeness(text, reviewed, coverage_audit, client, model)
     usages.extend(gap_repair_usages)
 
+    reviewed, consolidation_usages = _ensure_epic_consolidation(reviewed, client, model)
+    usages.extend(consolidation_usages)
+
     validate_extraction(reviewed, require_nonempty_epics=True)
     return reviewed, _combine_usage(*usages)
 
@@ -2437,6 +2713,11 @@ def extract_change_request(
         existing_epic_ids=existing_epic_ids, extra_context=review_extra_context,
     )
     usages.extend(gap_repair_usages)
+
+    reviewed, consolidation_usages = _ensure_epic_consolidation(
+        reviewed, client, model, existing_epic_ids=existing_epic_ids
+    )
+    usages.extend(consolidation_usages)
 
     validate_extraction(reviewed, existing_epic_ids=existing_epic_ids, require_nonempty_epics=True)
     return reviewed, _combine_usage(*usages)

@@ -41,6 +41,14 @@ extraction_model: gpt-4o
 # not just literal transcription), which uses meaningfully more output than
 # before. Leave headroom under the hard ceiling rather than sitting right at it.
 extraction_max_tokens: 16000
+# Epic size: an epic is a module/feature area, normally holding this many
+# stories. Used in the extraction prompt, and by the consolidation check: when
+# a fresh extraction has at least epic_consolidation_min_epics epics averaging
+# fewer than epic_target_min_stories stories each (typical of a long RFP whose
+# numbered sections were mirrored one-to-one), one extra call regroups them.
+epic_target_min_stories: 3
+epic_target_max_stories: 8
+epic_consolidation_min_epics: 6
 
 # ── Design alignment check (module 2) ────────────────────────────────────────
 alignment_model: gpt-4o

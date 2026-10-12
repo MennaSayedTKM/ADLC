@@ -1075,3 +1075,185 @@ def test_review_advisory_artifacts_clamps_score_and_returns_issues():
     assert score == 0
     assert summary == "Weak gaps."
     assert issues == ["Gap G1 is too vague."]
+
+
+# --- epic consolidation ---
+# Confirmed live: a ~74-section RFP came back as 66 epics of 1-3 stories, one
+# per numbered section. When a finished extraction has many thin epics, one
+# narrow call regroups them; our code applies its story -> epic mapping.
+
+def _story(story_id: str, epic_id: str) -> dict:
+    return {
+        "id": story_id,
+        "epic_id": epic_id,
+        "title": f"Story {story_id}",
+        "description": f"As a PM, I want {story_id}, so that it is tracked.",
+        "scenarios": [],
+        "acceptance_criteria": [{"text": f"{story_id} works.", "out_of_scope": False}],
+        "error_handling": [],
+    }
+
+
+def _epic(epic_id: str, section: str) -> dict:
+    return {
+        "id": epic_id,
+        "title": f"Section {section}",
+        "assumptions": [f"assumption {section}"],
+        "dependencies": [],
+        "source_reference": f"Section {section}",
+    }
+
+
+# six section-mirrored epics with one story each: the consolidation signature
+SECTION_MIRRORED_EXTRACTION = {
+    "epics": [_epic(f"E{n}", str(n + 10)) for n in range(1, 7)],
+    "user_stories": [_story(f"S{n}", f"E{n}") for n in range(1, 7)],
+    "gaps": [],
+}
+
+GOOD_GROUPING = {
+    "epics": [
+        {"id": "E1", "title": "Funding Applications", "assumptions": ["assumption 11"],
+         "dependencies": [], "source_reference": "Sections 11-13"},
+        {"id": "E2", "title": "Reporting", "assumptions": [],
+         "dependencies": [], "source_reference": "Sections 14-16"},
+    ],
+    "story_assignments": [
+        {"story_id": f"S{n}", "epic_id": "E1" if n <= 3 else "E2"} for n in range(1, 7)
+    ],
+}
+
+
+def _grouping_client(extraction: dict, groupings: list[dict], grouping_prompts: list[str]):
+    """record_extraction calls get `extraction`; record_epic_grouping calls get
+    `groupings` in order (the last one repeats) and their prompts are recorded."""
+    client = SimpleNamespace()
+    served = {"n": 0}
+
+    def create(**kwargs):
+        tool_choice = kwargs.get("tool_choice")
+        name = tool_choice["function"]["name"] if tool_choice else None
+        if name == "record_epic_grouping":
+            grouping_prompts.append(kwargs["messages"][-1]["content"])
+            data = groupings[min(served["n"], len(groupings) - 1)]
+            served["n"] += 1
+            return _fake_response(data, tool_name=name)
+        if name == "record_granularity_audit":
+            return _fake_response({"epic_findings": []}, tool_name=name)
+        if name == "record_extraction":
+            return _fake_response(extraction)
+        return _fake_response({}, tool_name="none")
+
+    client.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
+    return client
+
+
+def test_extraction_prompt_groups_epics_by_module_not_by_section():
+    from ai.text.requirements_extractor import _shared_instructions
+
+    text = _shared_instructions()
+    assert "EPIC GROUPING" in text
+    assert "MIRROR SOURCE STRUCTURE" not in text
+    assert "do NOT create one epic per numbered section" in text
+    assert "proposal or submission instructions" in text  # RFP sections, case (c)
+
+
+def test_needs_epic_consolidation_only_for_many_thin_epics():
+    from ai.text.requirements_extractor import _needs_epic_consolidation
+
+    assert _needs_epic_consolidation(SECTION_MIRRORED_EXTRACTION)
+    few_epics = {**SECTION_MIRRORED_EXTRACTION, "epics": SECTION_MIRRORED_EXTRACTION["epics"][:5],
+                 "user_stories": SECTION_MIRRORED_EXTRACTION["user_stories"][:5]}
+    assert not _needs_epic_consolidation(few_epics)
+    well_filled = {
+        **SECTION_MIRRORED_EXTRACTION,
+        "user_stories": [_story(f"S{e}{k}", f"E{e}") for e in range(1, 7) for k in range(3)],
+    }
+    assert not _needs_epic_consolidation(well_filled)
+
+
+def test_extract_requirements_regroups_section_mirrored_epics_without_touching_stories():
+    prompts: list[str] = []
+    client = _grouping_client(SECTION_MIRRORED_EXTRACTION, [GOOD_GROUPING], prompts)
+
+    data, _usage = extract_requirements("text", client, model="gpt-4o")
+
+    assert len(prompts) == 1
+    assert [e["id"] for e in data["epics"]] == ["E1", "E2"]
+    assert data["epics"][0]["title"] == "Funding Applications"
+    assert [s["epic_id"] for s in data["user_stories"]] == ["E1", "E1", "E1", "E2", "E2", "E2"]
+    # story content is untouched; only epic_id changed
+    for before, after in zip(SECTION_MIRRORED_EXTRACTION["user_stories"], data["user_stories"]):
+        assert {**after, "epic_id": before["epic_id"]} == before
+
+
+def test_epic_consolidation_is_not_called_for_a_well_grouped_extraction():
+    prompts: list[str] = []
+    client = _grouping_client(VALID_FRESH_EXTRACTION, [GOOD_GROUPING], prompts)
+
+    data, _usage = extract_requirements("text", client, model="gpt-4o")
+
+    assert prompts == []
+    assert data == VALID_FRESH_EXTRACTION
+
+
+def test_epic_consolidation_retries_a_grouping_that_drops_a_story():
+    prompts: list[str] = []
+    drops_s6 = {**GOOD_GROUPING, "story_assignments": GOOD_GROUPING["story_assignments"][:5]}
+    client = _grouping_client(SECTION_MIRRORED_EXTRACTION, [drops_s6, GOOD_GROUPING], prompts)
+
+    data, usage = extract_requirements("text", client, model="gpt-4o")
+
+    assert len(prompts) == 2
+    assert "['S6'] are not assigned" in prompts[1]
+    assert len(data["epics"]) == 2
+    assert len(data["user_stories"]) == 6
+
+
+def test_epic_consolidation_keeps_the_original_epics_if_the_grouping_stays_invalid():
+    prompts: list[str] = []
+    empty_epic = {
+        **GOOD_GROUPING,
+        "epics": GOOD_GROUPING["epics"] + [
+            {"id": "E3", "title": "Nothing", "assumptions": [], "dependencies": [], "source_reference": "x"}
+        ],
+    }
+    client = _grouping_client(SECTION_MIRRORED_EXTRACTION, [empty_epic], prompts)
+
+    data, _usage = extract_requirements("text", client, model="gpt-4o")
+
+    assert len(prompts) == 3  # _MAX_INVALID_RESPONSE_ATTEMPTS
+    assert data == SECTION_MIRRORED_EXTRACTION  # grouping is an improvement, not a reason to fail
+
+
+def test_epic_consolidation_in_a_change_request_leaves_baseline_stories_and_ids_alone():
+    prompts: list[str] = []
+    cr = {
+        **SECTION_MIRRORED_EXTRACTION,
+        "user_stories": SECTION_MIRRORED_EXTRACTION["user_stories"] + [_story("S7", "E1")],
+    }
+    # new epics can't reuse the baseline's E1; the CR's own epics are N1..N6 here
+    cr = {
+        "epics": [{**e, "id": f"N{n}"} for n, e in enumerate(cr["epics"], start=1)],
+        "user_stories": [
+            {**s, "epic_id": f"N{s['id'][1:]}"} if s["id"] != "S7" else s for s in cr["user_stories"]
+        ],
+        "gaps": [],
+    }
+    grouping = {
+        "epics": [{**GOOD_GROUPING["epics"][0], "id": "X"}, {**GOOD_GROUPING["epics"][1], "id": "Y"}],
+        "story_assignments": [
+            {"story_id": f"S{n}", "epic_id": "X" if n <= 3 else "Y"} for n in range(1, 7)
+        ],
+    }
+    client = _grouping_client(cr, [grouping], prompts)
+
+    data, _usage = extract_change_request(
+        "CR text", [ExistingEpic(external_id="E1", title="Baseline")], client, model="gpt-4o"
+    )
+
+    assert "reserved" in prompts[0] and "'E1'" in prompts[0]
+    assert '"S7"' not in prompts[0]  # attached to the baseline epic, not regrouped
+    assert [e["id"] for e in data["epics"]] == ["E2", "E3"]  # E1 is the baseline's
+    by_id = {s["id"]: s["epic_id"] for s in data["user_stories"]}
+    assert by_id == {"S1": "E2", "S2": "E2", "S3": "E2", "S4": "E3", "S5": "E3", "S6": "E3", "S7": "E1"}

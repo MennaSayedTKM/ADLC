@@ -47,6 +47,9 @@ CROP_MIN_PX = int(_require("crop_min_px"))
 # Requirements extraction (text-based, via Claude)
 EXTRACTION_MODEL = str(_require("extraction_model"))
 EXTRACTION_MAX_TOKENS = int(_require("extraction_max_tokens"))
+EPIC_TARGET_MIN_STORIES = int(_require("epic_target_min_stories"))
+EPIC_TARGET_MAX_STORIES = int(_require("epic_target_max_stories"))
+EPIC_CONSOLIDATION_MIN_EPICS = int(_require("epic_consolidation_min_epics"))
 
 # Design alignment check
 ALIGNMENT_MODEL = str(_require("alignment_model"))
