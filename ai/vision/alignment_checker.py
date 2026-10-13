@@ -63,7 +63,34 @@ class ApprovedStory:
     acceptance_criteria: list[str]
 
 
-def _build_prompt(stories: list[ApprovedStory], has_context_screens: bool) -> str:
+@dataclass
+class PlatformContext:
+    """What the design is supposed to be for, so a screen from another product
+    (different name, branding or domain) can be recognised as such."""
+
+    name: str
+    vision: str = ""
+
+
+# Confirmed live: nine sign-in/strategy screens from an unrelated product were
+# checked against a startup-support platform's stories and seven came back
+# "aligned". The old rules only raised findings for requirements a screen is
+# related to and called a screen aligned when every *relevant* requirement was
+# met, so a screen relevant to nothing was vacuously aligned. The model now
+# names the stories the screen implements, and code enforces the outcome when
+# it names none (see _enforce_traceability).
+UNTRACED_SCREEN_ISSUE = "This screen doesn't correspond to any approved requirement."
+UNTRACED_SCREEN_RECOMMENDATION = (
+    "Check that the screen belongs to this project. If it does, add the requirement it "
+    "implements to the approved stories before treating the design as complete."
+)
+
+
+def _build_prompt(
+    stories: list[ApprovedStory],
+    has_context_screens: bool,
+    platform: Optional[PlatformContext] = None,
+) -> str:
     lines = []
     for s in stories:
         ac = "; ".join(s.acceptance_criteria) if s.acceptance_criteria else "(none stated)"
@@ -78,15 +105,24 @@ def _build_prompt(stories: list[ApprovedStory], has_context_screens: bool) -> st
         else ""
     )
 
+    platform_note = ""
+    if platform is not None:
+        platform_note = f"This design is for the platform \"{platform.name}\"."
+        if platform.vision:
+            platform_note += f" Its purpose: {platform.vision}"
+        platform_note += "\n\n"
+
     return (
         "You will be shown one FOCUS screen from a design export, in detail.\n"
         f"{context_note}"
+        f"{platform_note}"
         "Approved requirement stories for this project:\n"
         f"{requirements_block}\n\n"
         "Compare the FOCUS screen against these requirements and return strict JSON with "
         "this exact shape:\n"
         "{\n"
         '  "status": "aligned | partial | misaligned",\n'
+        '  "related_requirement_ids": ["S1", ...],\n'
         '  "findings": [\n'
         '    {"requirement_id": "S1", "issue": "...", "recommendation": "...",\n'
         '     "bounding_box": {"top": <n>, "left": <n>, "bottom": <n>, "right": <n>} or null}\n'
@@ -95,10 +131,20 @@ def _build_prompt(stories: list[ApprovedStory], has_context_screens: bool) -> st
         "Rules:\n"
         "- status and findings are about the FOCUS screen specifically, not the design as a "
         "whole.\n"
+        "- related_requirement_ids lists the bracketed ids of the approved stories the FOCUS "
+        "screen implements or is clearly meant to implement. A generic element alone (a "
+        "sign-in form, a navigation bar) does not make a screen related to a story.\n"
+        "- If the FOCUS screen implements none of the approved stories — for example it shows "
+        "a different product's name, branding or subject matter, or functionality these "
+        "requirements don't describe — return an empty related_requirement_ids, status "
+        "\"misaligned\", and one finding with requirement_id null that says what the screen "
+        "shows and that it doesn't trace to any approved requirement. Such a screen is never "
+        "\"aligned\".\n"
         "- status: \"aligned\" if the focus screen satisfies the requirements it's relevant "
         "to, \"partial\" if it's close but missing or diverging on some points, "
         "\"misaligned\" if it substantially fails to implement what's required.\n"
-        "- Every finding's requirement_id must be one of the bracketed ids above.\n"
+        "- Every finding's requirement_id must be one of the bracketed ids above, except the "
+        "single untraceable-screen finding described above, whose requirement_id is null.\n"
         "- Do not raise a finding for a requirement the focus screen isn't related to.\n"
         "- A requirement is NOT missing on the focus screen if you can see it's clearly "
         "satisfied on one of the other screens shown for context — that's expected in a "
@@ -125,12 +171,16 @@ def check_alignment(
     client,
     model: str = ALIGNMENT_MODEL,
     context_screens: Optional[list[tuple[int, Image.Image]]] = None,
+    platform: Optional[PlatformContext] = None,
 ) -> tuple[dict[str, Any], Any]:
     """
     context_screens: (page_number, image) pairs for every *other* screen in
     the same design upload, sent as low-detail thumbnails so the model can
     tell when a requirement is satisfied elsewhere in the flow instead of
     wrongly flagging it missing on this one.
+
+    platform: the project's name and vision, so a screen from a different
+    product can be recognised.
     """
     if len(approved_stories) > ALIGNMENT_MAX_STORIES_INLINE:
         raise ValueError(
@@ -142,7 +192,10 @@ def check_alignment(
         )
 
     content = [
-        {"type": "text", "text": _build_prompt(approved_stories, has_context_screens=bool(context_screens))}
+        {
+            "type": "text",
+            "text": _build_prompt(approved_stories, has_context_screens=bool(context_screens), platform=platform),
+        }
     ]
     if context_screens:
         for page_num, img in context_screens:
@@ -162,8 +215,33 @@ def check_alignment(
 
     raw = response.choices[0].message.content.strip()
     data = parse_json_object(raw)
-    validate_alignment(data, valid_requirement_ids={s.external_id for s in approved_stories})
+    valid_ids = {s.external_id for s in approved_stories}
+    validate_alignment(data, valid_requirement_ids=valid_ids)
+    _enforce_traceability(data, valid_ids)
     return data, response.usage
+
+
+def _enforce_traceability(data: dict[str, Any], valid_requirement_ids: set[str]) -> None:
+    """A screen tied to no approved story can't be aligned or partly aligned:
+    mark it misaligned and make sure it carries a finding that says why. The
+    screen is related to a story if the model listed one in
+    related_requirement_ids or raised a finding against one."""
+    related = {
+        rid for rid in data.get("related_requirement_ids") or [] if rid in valid_requirement_ids
+    } | {f["requirement_id"] for f in data["findings"] if f["requirement_id"] in valid_requirement_ids}
+    data["related_requirement_ids"] = sorted(related)
+    if related:
+        return
+    data["status"] = "misaligned"
+    if not any(f["requirement_id"] is None for f in data["findings"]):
+        data["findings"].append(
+            {
+                "requirement_id": None,
+                "issue": UNTRACED_SCREEN_ISSUE,
+                "recommendation": UNTRACED_SCREEN_RECOMMENDATION,
+                "bounding_box": None,
+            }
+        )
 
 
 def validate_alignment(data: dict[str, Any], valid_requirement_ids: set[str]) -> None:

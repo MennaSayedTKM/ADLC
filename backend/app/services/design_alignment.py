@@ -17,10 +17,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from ai.ingest.ingest import tiles_for_document  # noqa: E402
-from ai.vision.alignment_checker import ApprovedStory, check_alignment  # noqa: E402
+from ai.vision.alignment_checker import ApprovedStory, PlatformContext, check_alignment  # noqa: E402
 from config import GPT4O_INPUT_COST_PER_MILLION, GPT4O_OUTPUT_COST_PER_MILLION  # noqa: E402
 
-from ..db.models import AiCall, AlignmentFinding, AlignmentReport, Document, RequirementItem
+from ..db.models import AiCall, AlignmentFinding, AlignmentReport, Document, Project, RequirementItem
 
 
 def _estimate_cost(usage) -> float:
@@ -76,6 +76,14 @@ def _load_screens(document_id: str) -> list[tuple[int, Image.Image]]:
     return [(t["page"], Image.open(t["tile_path"]).convert("RGB")) for t in tiles]
 
 
+def _platform_context(session: Session, requirements_document: Document) -> PlatformContext:
+    """The project's name, plus the platform vision from its UI/UX brief when
+    the PM has written one."""
+    project = session.get(Project, requirements_document.project_id)
+    vision = (project.style_brief or {}).get("vision") or ""
+    return PlatformContext(name=project.name, vision=str(vision).strip())
+
+
 def run_alignment_check(
     session: Session,
     design_document: Document,
@@ -94,6 +102,7 @@ def run_alignment_check(
         for r in story_rows
     ]
     story_id_to_item_id = {r.external_id: r.id for r in story_rows}
+    platform = _platform_context(session, requirements_document)
 
     screens = _load_screens(design_document.id)
     reports = []
@@ -104,7 +113,8 @@ def run_alignment_check(
         # actually satisfied on a different screen in the same flow.
         context_screens = [(p, img) for p, img in screens if p != page_num]
         data, usage = check_alignment(
-            screen_image, stories, openai_client, model=model, context_screens=context_screens
+            screen_image, stories, openai_client, model=model, context_screens=context_screens,
+            platform=platform,
         )
 
         report = AlignmentReport(

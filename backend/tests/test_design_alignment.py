@@ -21,7 +21,7 @@ from app.services.design_alignment import get_approved_stories, run_alignment_ch
 
 ALIGNMENT_RESPONSES = [
     '{"status": "partial", "findings": [{"requirement_id": "S1", "issue": "No error shown on bad password", "recommendation": "Add inline error text"}]}',
-    '{"status": "aligned", "findings": []}',
+    '{"status": "aligned", "related_requirement_ids": ["S1"], "findings": []}',
 ]
 
 
@@ -175,3 +175,40 @@ def test_run_alignment_check_persists_reports_findings_and_ai_calls(
         calls = s.query(AiCall).filter(AiCall.document_id == design_doc_id).all()
         assert len(calls) == 2
         assert all(c.call_type == "alignment" for c in calls)
+
+
+def test_run_alignment_check_flags_a_screen_from_another_product(
+    monkeypatch, approved_requirements_and_design_doc
+):
+    """Confirmed live: screens from an unrelated product came back "aligned"
+    because none of the stories applied to them. The project's name now goes
+    into the prompt, and a screen tied to no story is stored as misaligned
+    with a finding that has no story attached."""
+    _project_id, req_doc_id, design_doc_id = approved_requirements_and_design_doc
+    prompts: list[str] = []
+    client = MagicMock()
+
+    def _create(**kwargs):
+        prompts.append(kwargs["messages"][1]["content"][0]["text"])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"status": "aligned", "findings": []}'))],
+            usage=SimpleNamespace(prompt_tokens=700, completion_tokens=40),
+        )
+
+    client.chat.completions.create.side_effect = _create
+    monkeypatch.setattr(
+        "app.services.design_alignment._load_screens", lambda doc_id: [(1, Image.new("RGB", (10, 10)))]
+    )
+
+    with get_session() as s:
+        design_doc = s.query(Document).filter(Document.id == design_doc_id).first()
+        req_doc = s.query(Document).filter(Document.id == req_doc_id).first()
+        run_alignment_check(s, design_doc, req_doc, client, model="gpt-4o")
+
+    assert 'This design is for the platform "pytest-alignment-project"' in prompts[0]
+    with get_session() as s:
+        report = s.query(AlignmentReport).filter(AlignmentReport.design_document_id == design_doc_id).one()
+        assert report.status == "misaligned"
+        finding = s.query(AlignmentFinding).filter(AlignmentFinding.alignment_report_id == report.id).one()
+        assert finding.requirement_item_id is None
+        assert "doesn't correspond to any approved requirement" in finding.issue

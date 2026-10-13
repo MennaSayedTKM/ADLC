@@ -134,3 +134,70 @@ def test_check_alignment_raises_over_inline_story_threshold():
     with pytest.raises(ValueError, match="ALIGNMENT_MAX_STORIES_INLINE"):
         check_alignment(Image.new("RGB", (10, 10)), too_many, client, model="gpt-4o")
     client.chat.completions.create.assert_not_called()
+
+
+# A screen that implements none of the approved stories used to come back
+# "aligned" (nothing relevant to it was unmet). The model now names the
+# stories a screen implements, and code enforces the verdict when it names none.
+
+def test_check_alignment_marks_a_screen_tied_to_no_story_misaligned():
+    client = _fake_openai_client('{"status": "aligned", "related_requirement_ids": [], "findings": []}')
+
+    data, _usage = check_alignment(Image.new("RGB", (10, 10)), STORIES, client, model="gpt-4o")
+
+    assert data["status"] == "misaligned"
+    assert len(data["findings"]) == 1
+    assert data["findings"][0]["requirement_id"] is None
+    assert "doesn't correspond to any approved requirement" in data["findings"][0]["issue"]
+
+
+def test_check_alignment_keeps_the_models_own_untraced_finding():
+    content = (
+        '{"status": "misaligned", "related_requirement_ids": [], "findings": '
+        '[{"requirement_id": null, "issue": "This is a StratAlign sign-in page, not part of this platform.", '
+        '"recommendation": "Upload this project\'s screens."}]}'
+    )
+    client = _fake_openai_client(content)
+
+    data, _usage = check_alignment(Image.new("RGB", (10, 10)), STORIES, client, model="gpt-4o")
+
+    assert data["status"] == "misaligned"
+    assert [f["issue"] for f in data["findings"]] == ["This is a StratAlign sign-in page, not part of this platform."]
+
+
+def test_check_alignment_keeps_aligned_for_a_screen_that_implements_a_story():
+    client = _fake_openai_client('{"status": "aligned", "related_requirement_ids": ["S1"], "findings": []}')
+
+    data, _usage = check_alignment(Image.new("RGB", (10, 10)), STORIES, client, model="gpt-4o")
+
+    assert data["status"] == "aligned"
+    assert data["findings"] == []
+
+
+def test_check_alignment_counts_a_finding_against_a_story_as_related():
+    content = (
+        '{"status": "partial", "findings": '
+        '[{"requirement_id": "S2", "issue": "No reset link", "recommendation": "Add one"}]}'
+    )
+    client = _fake_openai_client(content)
+
+    data, _usage = check_alignment(Image.new("RGB", (10, 10)), STORIES, client, model="gpt-4o")
+
+    assert data["status"] == "partial"
+    assert data["related_requirement_ids"] == ["S2"]
+
+
+def test_check_alignment_tells_the_model_which_platform_the_design_is_for():
+    from ai.vision.alignment_checker import PlatformContext
+
+    client = _fake_openai_client('{"status": "aligned", "related_requirement_ids": ["S1"], "findings": []}')
+
+    check_alignment(
+        Image.new("RGB", (10, 10)), STORIES, client, model="gpt-4o",
+        platform=PlatformContext(name="Startup Growth Platform", vision="Supports startups from registration to funding."),
+    )
+
+    prompt = client.chat.completions.create.call_args.kwargs["messages"][1]["content"][0]["text"]
+    assert 'This design is for the platform "Startup Growth Platform"' in prompt
+    assert "Supports startups from registration to funding." in prompt
+    assert "related_requirement_ids" in prompt
