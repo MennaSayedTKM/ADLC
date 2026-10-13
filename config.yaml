@@ -49,6 +49,18 @@ extraction_max_tokens: 16000
 epic_target_min_stories: 3
 epic_target_max_stories: 8
 epic_consolidation_min_epics: 6
+# Long documents are extracted in parts: a document estimated above
+# extraction_single_pass_max_tokens is split at section headings into parts of
+# at most extraction_part_max_tokens, extraction_part_concurrency at a time, then
+# merged. Given a long, dense source in one call the model stops early (a
+# 41,500-token RFP produced 2 draft stories and nothing after section 28).
+extraction_single_pass_max_tokens: 10000
+extraction_part_max_tokens: 4000
+extraction_part_concurrency: 6
+# Which section categories a long document's parts are extracted from (see
+# SECTION_CATEGORIES in ai/text/requirements_extractor.py). Add non_functional
+# to turn security, performance, hosting... sections into stories too.
+extraction_section_categories: [platform]
 
 # ── Design alignment check (module 2) ────────────────────────────────────────
 alignment_model: gpt-4o

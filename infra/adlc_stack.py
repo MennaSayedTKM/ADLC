@@ -464,7 +464,9 @@ alb = aws.lb.LoadBalancer(
     load_balancer_type="application",
     subnets=[s.id for s in subnets],
     security_groups=[alb_sg.id],
-    idle_timeout=300,  # requirements extraction / alignment calls can run for minutes
+    # Requirements extraction runs in one request; a long document is extracted
+    # in parts and can take ~10 minutes (ai/text/requirements_extractor.py).
+    idle_timeout=900,
     drop_invalid_header_fields=True,
     tags=_name("alb"),
 )

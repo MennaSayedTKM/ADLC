@@ -3,6 +3,7 @@ Tests for ai/text/requirements_extractor.py (OpenAI function-calling output).
 The OpenAI client is mocked throughout — no network calls, no real cost.
 """
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -1148,14 +1149,19 @@ def _grouping_client(extraction: dict, groupings: list[dict], grouping_prompts: 
     return client
 
 
-def test_extraction_prompt_groups_epics_by_module_not_by_section():
-    from ai.text.requirements_extractor import _shared_instructions
+def test_grouping_is_left_to_the_grouping_pass_not_the_extraction_prompt():
+    """Measured on sections 15-31 of a long RFP: with an "EPIC GROUPING" rule or
+    an extra "don't make epics for procurement sections" case in the extraction
+    prompt, the draft wrote stories for 1-5 of 17 sections; without them, all
+    17. Extraction mirrors sections; grouping happens afterwards in code, and
+    procurement sections are filtered by the coverage audit's OUT OF SCOPE."""
+    from ai.text.requirements_extractor import COVERAGE_AUDIT_SYSTEM_PROMPT, _shared_instructions
 
     text = _shared_instructions()
-    assert "EPIC GROUPING" in text
-    assert "MIRROR SOURCE STRUCTURE" not in text
-    assert "do NOT create one epic per numbered section" in text
-    assert "proposal or submission instructions" in text  # RFP sections, case (c)
+    assert "MIRROR SOURCE STRUCTURE" in text
+    assert "EPIC GROUPING" not in text
+    assert "ABOUT the procurement" not in text
+    assert "proposal/submission instructions" in COVERAGE_AUDIT_SYSTEM_PROMPT
 
 
 def test_needs_epic_consolidation_only_for_many_thin_epics():
@@ -1257,3 +1263,237 @@ def test_epic_consolidation_in_a_change_request_leaves_baseline_stories_and_ids_
     assert [e["id"] for e in data["epics"]] == ["E2", "E3"]  # E1 is the baseline's
     by_id = {s["id"]: s["epic_id"] for s in data["user_stories"]}
     assert by_id == {"S1": "E2", "S2": "E2", "S3": "E2", "S4": "E3", "S5": "E3", "S6": "E3", "S7": "E1"}
+
+
+# --- long documents: extraction in parts ---
+# Measured on a 55-page RFP: one pass drafted sections 9-34 of 74, and the
+# review pass, rewriting everything at once, dropped more. A long document's
+# numbered sections are found in code, one small call classifies them, and only
+# platform-behaviour sections are extracted, a few at a time; the merged result
+# always goes through the grouping pass, which can also drop repeats.
+
+import ai.text.requirements_extractor as rx  # noqa: E402
+
+
+def _section(number: int, title: str, body_chars: int = 400) -> str:
+    return f"{number}. {title}\n" + ("Requirement text. " * (body_chars // 18)) + "\n"
+
+
+def _long_document() -> str:
+    return (
+        "Cover page\nTable of Contents\n2. Background ........ 3\n9. Registration ........ 5\n"
+        + _section(2, "Background")
+        + _section(3, "Startup Journey", 200)
+        + "1. Registration\n2. Profile\n3. Assessment\n"  # a numbered list inside a section
+        + _section(9, "Registration")
+        + _section(10, "Profile")
+        + _section(11, "Assessment")
+        + _section(12, "Proposal Requirements")
+        + _section(13, "Future Expansion / Phase 2")
+    )
+
+
+PLAN = {
+    "sections": [
+        {"number": 0, "category": "summary"},
+        {"number": 2, "category": "summary"},
+        {"number": 3, "category": "summary"},
+        {"number": 9, "category": "platform"},
+        {"number": 10, "category": "platform"},
+        {"number": 11, "category": "platform"},
+        {"number": 12, "category": "procurement"},
+        {"number": 13, "category": "later_phase"},
+    ]
+}
+
+
+@pytest.fixture
+def small_parts(monkeypatch):
+    # the test document counts as long; each platform section is its own part
+    monkeypatch.setattr(rx, "EXTRACTION_SINGLE_PASS_MAX_TOKENS", 100)
+    monkeypatch.setattr(rx, "EXTRACTION_PART_MAX_TOKENS", 120)
+    monkeypatch.setattr(rx, "EXTRACTION_PART_CONCURRENCY", 2)
+    monkeypatch.setattr(rx, "EXTRACTION_SECTION_CATEGORIES", ["platform"])
+    monkeypatch.setattr(rx, "_MIN_SECTIONS_FOR_PARTS", 3)
+
+
+def _planning_client(plan: dict, grouping: dict, extraction: dict = VALID_FRESH_EXTRACTION):
+    """Answers the section plan, every part's extraction calls, and the grouping."""
+    seen = {"plan": 0, "grouping": 0, "extraction_prompts": []}
+    client = SimpleNamespace()
+
+    def create(**kwargs):
+        name = kwargs.get("tool_choice", {}).get("function", {}).get("name") if kwargs.get("tool_choice") else None
+        if name == "record_section_plan":
+            seen["plan"] += 1
+            return _fake_response(plan, tool_name=name)
+        if name == "record_epic_grouping":
+            seen["grouping"] += 1
+            return _fake_response(grouping, tool_name=name)
+        if name == "record_granularity_audit":
+            return _fake_response({"epic_findings": []}, tool_name=name)
+        if name == "record_extraction":
+            seen["extraction_prompts"].append(kwargs["messages"][-1]["content"])
+            return _fake_response(extraction)
+        return _fake_response({}, tool_name="none")
+
+    client.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
+    return client, seen
+
+
+def test_numbered_sections_skip_the_table_of_contents_and_lists_inside_sections():
+    sections = rx._numbered_sections(_long_document())
+
+    assert [s.number for s in sections] == [0, 2, 3, 9, 10, 11, 12, 13]
+    assert sections[0].title == "Text before section 2"
+    assert "Table of Contents" in sections[0].text
+    assert "1. Registration\n2. Profile" in sections[2].text  # the list stays inside section 3
+    assert sections[3].title == "Registration"
+    assert "".join(s.text for s in sections) == _long_document()
+
+
+def test_short_sections_that_continue_the_numbering_are_still_sections():
+    text = "".join(_section(n, f"Topic {n}", 40) for n in range(60, 66))
+
+    assert [s.number for s in rx._numbered_sections(text)] == list(range(60, 66))
+
+
+def test_pack_sections_keeps_document_order_and_size_limit(small_parts):
+    sections = [s for s in rx._numbered_sections(_long_document()) if s.number in (9, 10, 11)]
+    parts = rx._pack_sections(sections)
+
+    assert len(parts) == 3
+    assert [p.split(".")[0] for p in parts] == ["9", "10", "11"]
+
+
+def test_a_short_document_is_extracted_in_one_pass():
+    client, seen = _planning_client(PLAN, {"epics": [], "story_assignments": []})
+
+    data, _usage = extract_requirements("1. Intro\nshort text", client, model="gpt-4o")
+
+    assert seen["plan"] == 0
+    assert len(seen["extraction_prompts"]) == 2  # one draft + one review
+    assert data == VALID_FRESH_EXTRACTION
+
+
+def test_merge_parts_renumbers_ids_across_parts():
+    merged = rx._merge_parts([VALID_FRESH_EXTRACTION, VALID_FRESH_EXTRACTION])
+
+    assert [e["id"] for e in merged["epics"]] == ["E1", "E2"]
+    assert [(s["id"], s["epic_id"]) for s in merged["user_stories"]] == [("S1", "E1"), ("S2", "E2")]
+    assert len(merged["gaps"]) == 2
+    validate_extraction(merged, require_nonempty_epics=True)
+
+
+def test_a_long_document_extracts_only_platform_sections_and_groups_the_result(small_parts):
+    grouping = {
+        "epics": [{"id": "E1", "title": "Startup Onboarding", "assumptions": [], "dependencies": [],
+                   "source_reference": "Sections 9-11"}],
+        "story_assignments": [{"story_id": f"S{n}", "epic_id": "E1", "duplicate_of": None} for n in (1, 2, 3)],
+    }
+    client, seen = _planning_client(PLAN, grouping)
+
+    data, _usage = extract_requirements(_long_document(), client, model="gpt-4o")
+
+    assert seen["plan"] == 1
+    drafted = [p for p in seen["extraction_prompts"] if p.startswith("Here is the full text")]
+    assert len(drafted) == 3  # sections 9, 10, 11 - not the summary, proposal or phase-2 sections
+    assert all("Proposal Requirements" not in p and "Background" not in p for p in drafted)
+    assert seen["grouping"] == 1
+    assert [e["title"] for e in data["epics"]] == ["Startup Onboarding"]
+    assert [s["id"] for s in data["user_stories"]] == ["S1", "S2", "S3"]
+    later_phase = [g for g in data["gaps"] if g["location"] == "13. Future Expansion / Phase 2"]
+    assert len(later_phase) == 1 and "later-phase scope" in later_phase[0]["description"]
+
+
+def test_a_long_document_falls_back_to_one_pass_if_planning_keeps_failing(small_parts):
+    incomplete_plan = {"sections": PLAN["sections"][:3]}
+    client, seen = _planning_client(incomplete_plan, {"epics": [], "story_assignments": []})
+
+    data, _usage = extract_requirements(_long_document(), client, model="gpt-4o")
+
+    assert seen["plan"] == 3  # _MAX_INVALID_RESPONSE_ATTEMPTS
+    assert "have no category" not in str(data)
+    assert len(seen["extraction_prompts"]) == 2  # the whole document, one draft + review
+    assert seen["extraction_prompts"][0].count("Proposal Requirements") == 1
+
+
+def test_a_part_that_keeps_failing_becomes_a_gap(small_parts, monkeypatch):
+    real_extract_one = rx._extract_one
+
+    def flaky(text, client, model):
+        if text.startswith("10. Profile"):
+            raise ValueError("model kept returning an invalid extraction")
+        return real_extract_one(text, client, model)
+
+    monkeypatch.setattr(rx, "_extract_one", flaky)
+    client, _seen = _planning_client(PLAN, {"epics": [], "story_assignments": []})
+
+    data, _usage = extract_requirements(_long_document(), client, model="gpt-4o")
+
+    failure_gaps = [g for g in data["gaps"] if "could not be turned into stories" in g["description"]]
+    assert [g["location"] for g in failure_gaps] == ["10. Profile"]
+    assert failure_gaps[0]["severity"] == "high"
+
+
+def test_extraction_fails_if_every_part_fails(small_parts, monkeypatch):
+    def always_fails(text, client, model):
+        raise ValueError("model kept returning an invalid extraction")
+
+    monkeypatch.setattr(rx, "_extract_one", always_fails)
+    client, _seen = _planning_client(PLAN, {"epics": [], "story_assignments": []})
+
+    with pytest.raises(ValueError, match="invalid extraction"):
+        extract_requirements(_long_document(), client, model="gpt-4o")
+
+
+def test_grouping_puts_a_story_it_left_out_with_its_original_epic():
+    stories = [_story("S1", "E1"), _story("S2", "E1"), _story("S3", "E2")]
+    result = {
+        "epics": [{"id": "N1", "title": "x", "assumptions": [], "dependencies": [], "source_reference": "x"}],
+        "story_assignments": [
+            {"story_id": "S1", "epic_id": "N1", "duplicate_of": None},
+            {"story_id": "S3", "epic_id": "N1", "duplicate_of": None},
+        ],
+    }
+
+    rx._complete_assignments(result, stories)
+
+    assert {"story_id": "S2", "epic_id": "N1", "duplicate_of": None} in result["story_assignments"]
+
+
+def test_grouping_drops_a_story_marked_as_a_repeat_and_its_empty_epic():
+    prompts: list[str] = []
+    grouping = {
+        "epics": [
+            {"id": "E1", "title": "Funding Applications", "assumptions": [], "dependencies": [], "source_reference": "Sections 11-15"},
+            {"id": "E2", "title": "Requirements Matrix", "assumptions": [], "dependencies": [], "source_reference": "Section 16"},
+        ],
+        "story_assignments": [
+            {"story_id": f"S{n}", "epic_id": "E1", "duplicate_of": None} for n in range(1, 6)
+        ] + [{"story_id": "S6", "epic_id": "E2", "duplicate_of": "S2"}],
+    }
+    client = _grouping_client(SECTION_MIRRORED_EXTRACTION, [grouping], prompts)
+
+    data, _usage = extract_requirements("text", client, model="gpt-4o")
+
+    assert [s["id"] for s in data["user_stories"]] == ["S1", "S2", "S3", "S4", "S5"]
+    assert [e["title"] for e in data["epics"]] == ["Funding Applications"]
+
+
+def test_grouping_rejects_a_repeat_that_points_at_another_repeat():
+    from ai.text.requirements_extractor import _check_epic_consolidation
+
+    result = {
+        "epics": [{"id": "E1", "title": "x", "assumptions": [], "dependencies": [], "source_reference": "x"}],
+        "story_assignments": [
+            {"story_id": "S1", "epic_id": "E1", "duplicate_of": None},
+            {"story_id": "S2", "epic_id": "E1", "duplicate_of": "S3"},
+            {"story_id": "S3", "epic_id": "E1", "duplicate_of": "S1"},
+        ],
+    }
+    with pytest.raises(ValueError, match="itself marked as a duplicate"):
+        _check_epic_consolidation(result, {"S1", "S2", "S3"}, set())
+    result["story_assignments"][1]["duplicate_of"] = "S2"
+    with pytest.raises(ValueError, match="not another story"):
+        _check_epic_consolidation(result, {"S1", "S2", "S3"}, set())

@@ -43,9 +43,8 @@ a whole mandatory capability section with no signal anywhere in the output
 design didn't catch it either, since the review pass only re-checks the
 draft's own claims, not the source's full inventory of requirements. Once
 the coverage audit was strong enough to catch that, a second problem
-surfaced just as reliably: the then-rule MIRROR SOURCE STRUCTURE (since
-replaced by EPIC GROUPING) created an epic per
-source subsection before the model knew whether that subsection was
+surfaced just as reliably: MIRROR SOURCE STRUCTURE creates an epic per
+source subsection before the model knows whether that subsection is
 story-worthy, and the review pass — despite an explicit instruction to
 delete any leftover empty shell — kept leaving out-of-scope subsections'
 epics in place empty rather than deleting them. The repair call exists
@@ -56,7 +55,9 @@ a call with no other job.
 
 import json
 import logging
+import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -120,6 +121,10 @@ from config import (  # noqa: E402
     EPIC_TARGET_MIN_STORIES,
     EXTRACTION_MAX_TOKENS,
     EXTRACTION_MODEL,
+    EXTRACTION_PART_CONCURRENCY,
+    EXTRACTION_PART_MAX_TOKENS,
+    EXTRACTION_SECTION_CATEGORIES,
+    EXTRACTION_SINGLE_PASS_MAX_TOKENS,
 )
 
 SYSTEM_PROMPT = (
@@ -300,9 +305,9 @@ def _shared_instructions() -> str:
         "A story whose only acceptance criterion is a vague restatement of its own title "
         "(\"X is fully configured and approved\") is under-specified regardless of how many "
         "stories it's split across — decompose its criteria, not necessarily the story "
-        "itself. And EPIC GROUPING below is an epic-level rule only — it never changes the "
-        "story count; the story count for each subsection an epic draws from is decided "
-        "purely by the top-level bullet count above.\n\n"
+        "itself. And \"one epic per subsection\" (see MIRROR SOURCE STRUCTURE below) is an "
+        "epic-level rule only — it never implies \"one story per subsection\"; the story "
+        "count inside an epic is decided purely by the top-level bullet count above.\n\n"
         "BULLET-LEVEL FIDELITY:\n"
         "When a subsection lists several distinct sub-behaviors — each its own bullet or "
         "sub-bullet, e.g. \"configure baselines, targets, and thresholds\", \"configure "
@@ -334,25 +339,16 @@ def _shared_instructions() -> str:
         "list — resist that. A story needs both: the bullet-literal scenarios this section "
         "asks for, and the standard elaboration ones, together, not a trade-off between "
         "them.\n\n"
-        "EPIC GROUPING:\n"
-        "An epic is a functional module or feature area of the platform — the unit a "
-        f"delivery team plans a release around — and normally holds {EPIC_TARGET_MIN_STORIES}–"
-        f"{EPIC_TARGET_MAX_STORIES} stories. Use the document's own structure to see which "
-        "module content belongs to, but do NOT create one epic per numbered section: long "
-        "documents (an RFP or tender with dozens of numbered sections) spread one module "
-        "across several short sections, and mirroring them one-to-one produces dozens of "
-        "one-story epics, which is wrong. Group sibling or related sections that describe "
-        "the same capability area into one epic (e.g. separate sections on application "
-        "intake, eligibility screening and evaluation scoring are one \"Funding Application "
-        "& Evaluation\" epic), give it a module-level title, and list every section it draws "
-        "from in its source_reference (e.g. \"Sections 18–21\"). Where the document already "
-        "defines a few large modules (e.g. \"4.1.A\", \"Module B\"), those are natural epics; "
-        "a flat narrative document (a CR, for instance) is grouped by cohesive capability. "
-        "A genuinely separate module still gets its own epic even if it yields fewer stories "
-        "than the range above — the range guides grouping; it is never a reason to merge "
-        "unrelated capabilities or to split or merge stories. Only sections that DO describe "
-        "platform behavior take part in this; see WHAT NOT TO TURN INTO STORIES below, which "
-        "overrides this when they conflict.\n\n"
+        "MIRROR SOURCE STRUCTURE:\n"
+        "If the document organizes its scope into its own numbered or lettered subsections "
+        "(e.g. \"4.1.A\", \"Section 3.2\", \"Module B\"), use that structure as scaffolding "
+        "for your epic grouping — one epic per named subsection/module the source itself "
+        "defines, rather than inventing your own grouping from scratch. If the document has "
+        "no such structure (a flat narrative CR, for instance), group by cohesive capability "
+        "as described above instead. This is scaffolding for subsections that DO describe "
+        "platform behavior — it is not a license to create an epic for every subsection "
+        "regardless of content; see WHAT NOT TO TURN INTO STORIES below, which overrides "
+        "this when they conflict.\n\n"
         "WHAT NOT TO TURN INTO STORIES:\n"
         "EVERY EPIC YOU CREATE MUST HAVE AT LEAST ONE STORY. This is a hard rule, not "
         "guidance — there is no valid, correct output where an epic exists with zero "
@@ -368,21 +364,6 @@ def _shared_instructions() -> str:
         "training/enablement/knowledge-transfer — these describe how the delivery team does "
         "its job, not what the platform does → do not create an epic for it at all, not "
         "even an empty one to acknowledge you saw it.\n"
-        "  (c) It's ABOUT the procurement or the engagement rather than about what the "
-        "platform does — common in RFPs and tenders: proposal or submission instructions and "
-        "formats (technical proposal, commercial/financial proposal, bidder or vendor "
-        "qualifications, evaluation and award criteria), project risks and mitigations, "
-        "project-level assumptions and dependencies, acceptance criteria for the engagement "
-        "as a whole, KPIs or success measures for the project itself, expected outcomes or "
-        "benefits, timelines, milestones and payment terms → do not create an epic or a "
-        "story for it. Use its content where it belongs instead: an assumption or dependency "
-        "that bears on a specific capability goes into that epic's assumptions/dependencies; "
-        "a risk or open point that needs a client/PM decision becomes a gap; a concrete, "
-        "measurable target the platform itself must meet or enforce becomes acceptance "
-        "criteria on the story it constrains. Careful with names: a section describing KPI "
-        "features the platform provides to its users (defining KPIs, targets, dashboards) is "
-        "platform behavior, case (a); a section listing KPIs that measure whether the "
-        "PROJECT succeeded is case (c).\n"
         "If you are ever tempted to create an epic without immediately writing at least one "
         "real story for it, that hesitation itself is the signal that the subsection is "
         "actually case (b) — resolve it by not creating the epic, never by creating an "
@@ -768,12 +749,7 @@ REVIEW_SYSTEM_PROMPT = (
     "(\"the feature works well\" is not acceptable) — tighten it.\n"
     "4) INCONSISTENT GROUPING — a story that's really two unrelated capabilities bundled "
     "together, or several stories that are really one capability needlessly split apart, "
-    "per the granularity rules you were given the first time. At the epic level: epics "
-    "that just mirror individual numbered sections, each holding one or two stories, "
-    "where several of them belong to the same module — merge them into one module-level "
-    "epic per EPIC GROUPING (moving their stories unchanged), and delete any epic that is "
-    "really about the procurement or engagement (case (c) of WHAT NOT TO TURN INTO "
-    "STORIES) rather than about the platform.\n"
+    "per the granularity rules you were given the first time.\n"
     "5) MISSING SCENARIO COVERAGE — a story whose scenarios skip a category that clearly "
     "applies to it (e.g. a story about a configuration form with no required-field "
     "validation scenario at all).\n"
@@ -901,7 +877,8 @@ COVERAGE_AUDIT_SYSTEM_PROMPT = (
     "procurement or engagement rather than the platform (proposal/submission "
     "instructions, bidder qualifications, evaluation criteria, project risks, "
     "project-level assumptions, success KPIs or expected outcomes of the project, "
-    "timelines and payment terms), sections the document "
+    "timelines and payment terms, project governance, team, methodology, phases, milestones "
+    "and implementation roadmaps), sections the document "
     "itself marks out of scope, and non-functional/SLA/governance content that genuinely "
     "applies to the system this document IS about (uptime targets, RTO/RPO, access "
     "control, audit logging FOR THIS PLATFORM). A section being OUT OF SCOPE is a "
@@ -1129,10 +1106,13 @@ def _ensure_nonempty_epics(
 #
 # Confirmed live against a ~74-section RFP: the extraction mirrored the
 # document's numbered sections one-to-one into 66 epics of 1-3 stories each.
-# The EPIC GROUPING prompt rule now asks for module-level epics, but — like
-# every other "just don't do X" rule in this file — that alone isn't relied
-# on. When the finished extraction still has many thin epics, one narrow call
-# regroups them. It returns only a story → epic mapping plus the new epic
+# Grouping is done here, after extraction, and deliberately not in the
+# extraction prompts: an "EPIC GROUPING" prompt rule (module-level epics, "do
+# not create one epic per numbered section") was tried and made the draft stop
+# after the first section — on sections 15-31 of that RFP it wrote 1 epic and
+# 1 story, where MIRROR SOURCE STRUCTURE writes 17 epics covering every
+# section. So extraction mirrors the source's sections, and when the finished
+# extraction has many thin epics, one narrow call regroups them. It returns only a story → epic mapping plus the new epic
 # headers; our code applies it, so story content can't be dropped or
 # rewritten, and the output stays small however many stories there are.
 
@@ -1147,8 +1127,9 @@ _EPIC_CONSOLIDATION_PARAMETERS = {
                 "properties": {
                     "story_id": {"type": "string"},
                     "epic_id": {"type": "string"},
+                    "duplicate_of": {"type": ["string", "null"]},
                 },
-                "required": ["story_id", "epic_id"],
+                "required": ["story_id", "epic_id", "duplicate_of"],
                 "additionalProperties": False,
             },
         },
@@ -1161,7 +1142,7 @@ _EPIC_CONSOLIDATION_TOOL = {
     "type": "function",
     "function": {
         "name": "record_epic_grouping",
-        "description": "Record the module-level epics and which epic each story belongs to.",
+        "description": "Record the module-level epics, which epic each story belongs to, and which stories repeat another.",
         "parameters": _EPIC_CONSOLIDATION_PARAMETERS,
         "strict": True,
     },
@@ -1170,8 +1151,9 @@ _EPIC_CONSOLIDATION_TOOL = {
 EPIC_CONSOLIDATION_SYSTEM_PROMPT = (
     "You are the same senior Business Analyst, fixing one narrow defect in a finished "
     "requirements extraction: it has too many thin epics, typically one per numbered "
-    "section of a long document. The stories themselves are fine and are not yours to "
-    "change. Your only job is to group them into module-level epics.\n\n"
+    "section of a long document, and when the document was extracted in parts some stories "
+    "may repeat each other. The stories themselves are not yours to change. Your job is to "
+    "group them into module-level epics and to point out exact repeats.\n\n"
     "An epic is a functional module or feature area of the platform — the unit a delivery "
     f"team plans a release around — normally holding {EPIC_TARGET_MIN_STORIES}–"
     f"{EPIC_TARGET_MAX_STORIES} stories. Merge epics whose stories belong to the same module "
@@ -1187,6 +1169,12 @@ EPIC_CONSOLIDATION_SYSTEM_PROMPT = (
     "only.\n"
     "- Give your epics ids \"E1\", \"E2\", ... in the order you list them, unless told "
     "below that some ids are reserved.\n"
+    "- duplicate_of is null for almost every story. Set it to another story's id only when "
+    "this story states the same requirement as that one, typically a summary table, "
+    "requirements matrix, roadmap or appendix restating a capability that is specified in "
+    "full elsewhere. Point to the fuller story, which must not itself be a duplicate. "
+    "Related but different capabilities (create vs. approve, view vs. export) are never "
+    "duplicates. A duplicate still gets an epic assignment.\n"
 )
 
 
@@ -1241,6 +1229,13 @@ def _check_epic_consolidation(
             raise ValueError(f"Story {a['story_id']!r} is assigned to undeclared epic {a['epic_id']!r}")
         assigned[a["story_id"]] = a["epic_id"]
 
+    duplicate_of = {a["story_id"]: a.get("duplicate_of") for a in result["story_assignments"] if a.get("duplicate_of")}
+    for story_id, target in duplicate_of.items():
+        if target not in story_ids or target == story_id:
+            raise ValueError(f"Story {story_id!r} is marked as a duplicate of {target!r}, which is not another story given")
+        if target in duplicate_of:
+            raise ValueError(f"Story {story_id!r} is marked as a duplicate of {target!r}, which is itself marked as a duplicate")
+
     missing = story_ids - assigned.keys()
     if missing:
         raise ValueError(f"Stories {sorted(missing)!r} are not assigned to any epic")
@@ -1249,12 +1244,30 @@ def _check_epic_consolidation(
         raise ValueError(f"Epics {sorted(empty)!r} have no story assigned")
 
 
+def _complete_assignments(result: dict[str, Any], stories: list[dict[str, Any]]) -> None:
+    """Confirmed live with 325 stories: the grouping left out one story three
+    times running, and the whole grouping was discarded. A story left out is
+    put in the new epic that most of its original epic's stories went to; one
+    whose original epic has no story assigned at all is still an error."""
+    assigned = {a["story_id"]: a["epic_id"] for a in result["story_assignments"]}
+    original_epic = {s["id"]: s["epic_id"] for s in stories}
+    for story in stories:
+        if story["id"] in assigned:
+            continue
+        siblings = [assigned[sid] for sid, epic in original_epic.items() if epic == story["epic_id"] and sid in assigned]
+        if siblings:
+            target = max(set(siblings), key=siblings.count)
+            result["story_assignments"].append({"story_id": story["id"], "epic_id": target, "duplicate_of": None})
+            assigned[story["id"]] = target
+
+
 def _epic_consolidation_feedback(error: ValueError) -> str:
     return (
         "\n\nIMPORTANT: a previous answer to this exact request was rejected with this "
         f"error:\n{error}\n"
         "Return the grouping again with that fixed: every story listed above assigned exactly "
-        "once to an epic you declare, and every declared epic with at least one story."
+        "once to an epic you declare, every declared epic with at least one story, and "
+        "duplicate_of either null or the id of a different story that is not itself a duplicate."
     )
 
 
@@ -1262,7 +1275,8 @@ def _apply_epic_consolidation(
     data: dict[str, Any], result: dict[str, Any], reserved_epic_ids: set[str]
 ) -> dict[str, Any]:
     """New epics get ids E1, E2, ... in the order returned (skipping reserved
-    ids); only the regrouped stories' epic_id changes."""
+    ids); only the regrouped stories' epic_id changes. Stories marked as a
+    duplicate are dropped, and so is an epic left holding nothing else."""
     taken = set(reserved_epic_ids)
     id_map: dict[str, str] = {}
     n = 1
@@ -1275,10 +1289,16 @@ def _apply_epic_consolidation(
         epics.append({**epic, "id": f"E{n}"})
 
     new_epic_of = {a["story_id"]: id_map[a["epic_id"]] for a in result["story_assignments"]}
+    duplicates = {a["story_id"] for a in result["story_assignments"] if a.get("duplicate_of")}
+    if duplicates:
+        logger.info("Dropping %d duplicate stories: %s", len(duplicates), sorted(duplicates))
     stories = [
         {**s, "epic_id": new_epic_of[s["id"]]} if s["id"] in new_epic_of else s
         for s in data["user_stories"]
+        if s["id"] not in duplicates
     ]
+    used = {s["epic_id"] for s in stories}
+    epics = [e for e in epics if e["id"] in used]
     return {**data, "epics": epics, "user_stories": stories}
 
 
@@ -1287,9 +1307,12 @@ def _ensure_epic_consolidation(
     client,
     model: str,
     existing_epic_ids: Optional[set[str]] = None,
+    always: bool = False,
 ) -> tuple[dict[str, Any], list[Usage]]:
     """
-    One regrouping call, only when _needs_epic_consolidation(). Runs last,
+    One regrouping call, only when _needs_epic_consolidation(), or always for
+    an extraction merged from parts, where one module can span two parts and
+    a restating section can repeat stories. Runs last,
     after the granularity and gap repairs: _looks_already_well_split skips the
     granularity audit once every epic has 2+ stories, so merging earlier
     would hide under-split sections from it. Grouping is an improvement, not
@@ -1297,7 +1320,7 @@ def _ensure_epic_consolidation(
     the extraction is kept as it was rather than failing the PM's request.
     """
     usages: list[Usage] = []
-    if not _needs_epic_consolidation(data):
+    if len(data["epics"]) < 2 or not (always or _needs_epic_consolidation(data)):
         return data, usages
 
     reserved = existing_epic_ids or set()
@@ -1305,6 +1328,11 @@ def _ensure_epic_consolidation(
     stories = [s for s in data["user_stories"] if s["epic_id"] in epic_ids]
     story_ids = {s["id"] for s in stories}
     prompt = _build_epic_consolidation_prompt(data["epics"], stories, reserved)
+
+    def check(result: dict[str, Any]) -> None:
+        _complete_assignments(result, stories)
+        _check_epic_consolidation(result, story_ids, reserved)
+
     try:
         result, usage = _call_until_valid(
             lambda p: _call_with_tool(
@@ -1312,7 +1340,7 @@ def _ensure_epic_consolidation(
                 _EPIC_CONSOLIDATION_TOOL, "record_epic_grouping",
             ),
             prompt,
-            lambda r: _check_epic_consolidation(r, story_ids, reserved),
+            check,
             _epic_consolidation_feedback,
         )
     except InvalidModelResponseError as e:
@@ -2608,7 +2636,34 @@ def extract_requirements(
     independently-shippable stories into one (all three confirmed to happen
     without these steps) is far more expensive to catch later than a few
     extra model calls are now.
+
+    A long document with numbered sections is extracted in parts instead:
+    see _plan_long_document and _extract_in_parts for why.
     """
+    usages: list[Usage] = []
+    plan = None
+    if len(text) > EXTRACTION_SINGLE_PASS_MAX_TOKENS * _CHARS_PER_TOKEN:
+        plan, plan_usages = _plan_long_document(text, client, model)
+        usages.extend(plan_usages)
+
+    if plan is None:
+        data, extract_usages = _extract_one(text, client, model)
+    else:
+        parts, later_phase_gaps = plan
+        data, extract_usages = _extract_in_parts(parts, client, model)
+        data["gaps"].extend(later_phase_gaps)
+    usages.extend(extract_usages)
+
+    data, consolidation_usages = _ensure_epic_consolidation(data, client, model, always=plan is not None)
+    usages.extend(consolidation_usages)
+
+    validate_extraction(data, require_nonempty_epics=True)
+    return data, _combine_usage(*usages)
+
+
+def _extract_one(text: str, client, model: str) -> tuple[dict[str, Any], list[Usage]]:
+    """Draft, coverage audit, review and the repair passes for one source text
+    (a whole document, or one part of a long one)."""
     prompt = (
         "Here is the full text of a requirements document:\n\n"
         f"{text}\n\n"
@@ -2635,12 +2690,333 @@ def extract_requirements(
 
     reviewed, gap_repair_usages = _ensure_gap_completeness(text, reviewed, coverage_audit, client, model)
     usages.extend(gap_repair_usages)
+    return reviewed, usages
 
-    reviewed, consolidation_usages = _ensure_epic_consolidation(reviewed, client, model)
-    usages.extend(consolidation_usages)
 
-    validate_extraction(reviewed, require_nonempty_epics=True)
-    return reviewed, _combine_usage(*usages)
+# --- Long documents: extraction in parts ---
+#
+# Measured against a 55-page RFP (~41,500 tokens, 74 numbered sections,
+# hundreds of numbered requirements), in one pass:
+#   - the draft wrote sections 9-34 and stopped (7,400 of 16,000 output tokens);
+#   - the review pass, rewriting the whole extraction at once, then dropped more
+#     (sections 15-17 and 29-34), so the PM got 25 stories covering 9-28.
+# Each part below holds only a few sections, so its draft and review cover all
+# of them; the parts are merged and the grouping pass (_ensure_epic_consolidation)
+# turns their per-section epics into modules and drops repeats.
+#
+# Only sections that describe platform behaviour are extracted. Splitting the
+# whole text blindly was tried first and was unstable: a part holding the table
+# of contents or the executive summary was extracted as if it were specification,
+# duplicating stories and producing hundreds of "missing" gaps (its audit saw
+# sections listed that the part did not contain). So one small call classifies
+# each numbered section first (_plan_long_document), by title and opening lines.
+
+_CHARS_PER_TOKEN = 4  # rough estimate for English text; only used to size parts
+
+_MIN_SECTIONS_FOR_PARTS = 5
+_SECTION_EXCERPT_CHARS = 500
+_MIN_SECTION_CHARS = 300
+
+# "29. CIT Administration Portal" on a line of its own; table-of-contents lines
+# ("29. CIT Administration Portal ........ 31") are filtered out below.
+_SECTION_HEADING = re.compile(r"(?m)^[ \t]*(\d{1,3})\.[ \t]+([A-Z][^\n]{0,100}?)[ \t]*$")
+
+SECTION_CATEGORIES = ("platform", "non_functional", "delivery", "procurement", "summary", "later_phase")
+
+
+def _numbered_list_items(headings: list[re.Match]) -> set[int]:
+    """ids of heading-like lines that are really a numbered list inside a
+    section (a user journey's "1. Registration", "2. Profile", ... a line
+    apart): runs that restart at 1 with consecutive numbers close together.
+    Short real sections close together continue the document's numbering, so
+    they never start at 1."""
+    items: set[int] = set()
+    run: list[re.Match] = []
+    for match in headings + [None]:
+        continues = (
+            match is not None
+            and run
+            and int(match.group(1)) == int(run[-1].group(1)) + 1
+            and match.start() - run[-1].start() < _MIN_SECTION_CHARS
+        )
+        if continues:
+            run.append(match)
+            continue
+        if len(run) >= 2 and int(run[0].group(1)) == 1:
+            items.update(id(m) for m in run)
+        run = [match] if match is not None else []
+    return items
+
+
+@dataclass
+class _Section:
+    number: int
+    title: str
+    text: str
+
+
+def _numbered_sections(text: str) -> list[_Section]:
+    """The document's top-level numbered sections, in order: the longest run of
+    headings with increasing numbers, preferring steps of one (so a numbered
+    list inside a section, which restarts at 1, isn't mistaken for sections,
+    and a skipped number doesn't break the run). Text before the first heading
+    becomes section 0."""
+    headings = [m for m in _SECTION_HEADING.finditer(text) if ".." not in m.group(2)]
+    candidates = [m for m in headings if id(m) not in _numbered_list_items(headings)]
+    if not candidates:
+        return []
+    chain_length = [1] * len(candidates)
+    previous = [-1] * len(candidates)
+    for i, match in enumerate(candidates):
+        number = int(match.group(1))
+        for j in range(i):
+            earlier = int(candidates[j].group(1))
+            if earlier >= number:
+                continue
+            closer = previous[i] == -1 or earlier > int(candidates[previous[i]].group(1))
+            if chain_length[j] + 1 > chain_length[i] or (chain_length[j] + 1 == chain_length[i] and closer):
+                chain_length[i] = chain_length[j] + 1
+                previous[i] = j
+    i = max(range(len(candidates)), key=lambda k: chain_length[k])
+    chain = []
+    while i != -1:
+        chain.append(candidates[i])
+        i = previous[i]
+    chain.reverse()
+
+    sections = []
+    if text[: chain[0].start()].strip():
+        sections.append(_Section(0, f"Text before section {chain[0].group(1)}", text[: chain[0].start()]))
+    for k, match in enumerate(chain):
+        end = chain[k + 1].start() if k + 1 < len(chain) else len(text)
+        sections.append(_Section(int(match.group(1)), match.group(2).strip(), text[match.start():end]))
+    return sections
+
+
+_SECTION_PLAN_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "sections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "number": {"type": "integer"},
+                    "category": {"type": "string", "enum": list(SECTION_CATEGORIES)},
+                },
+                "required": ["number", "category"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["sections"],
+    "additionalProperties": False,
+}
+
+_SECTION_PLAN_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "record_section_plan",
+        "description": "Record one category for every numbered section of the document.",
+        "parameters": _SECTION_PLAN_PARAMETERS,
+        "strict": True,
+    },
+}
+
+SECTION_PLAN_SYSTEM_PROMPT = (
+    "You are the same senior Business Analyst, preparing a long requirements document for "
+    "extraction. You are shown each numbered section's title and opening lines. Put every "
+    "section in exactly one category:\n"
+    "- platform: what the system must do for its users: features, workflows, the data it "
+    "manages, rules it enforces, screens, dashboards, reports, search, notifications, "
+    "integrations with other systems, user roles and permissions, audit trails, and the "
+    "administration or configuration it offers.\n"
+    "- non_functional: qualities rather than features: security controls, privacy, "
+    "performance, scalability, availability, backup and recovery, hosting, accessibility "
+    "standards, technical architecture.\n"
+    "- delivery: how the vendor runs the project: data migration work, testing, UAT, "
+    "deployment, training, documentation, support and maintenance, SLAs, governance, team, "
+    "methodology, phases, milestones, deliverables, roadmaps.\n"
+    "- procurement: about the tender or contract: proposal instructions and formats, "
+    "evaluation, commercial terms, assumptions, risks, project KPIs, acceptance and expected "
+    "outcomes, intellectual property, vendor lock-in.\n"
+    "- summary: background, objectives, vision, scope summaries, personas and journey "
+    "overviews, tables of contents, and matrices or appendices that restate requirements "
+    "specified in other sections.\n"
+    "- later_phase: content the document explicitly places in a later phase or future "
+    "expansion.\n"
+    "When a section is unclear between platform and another category, choose platform: a "
+    "missed capability costs more than an extra section to review."
+)
+
+
+def _build_section_plan_prompt(sections: list[_Section]) -> str:
+    lines = []
+    for section in sections:
+        body = section.text[: _SECTION_EXCERPT_CHARS].strip()
+        lines.append(f"## Section {section.number}: {section.title}\n{body}\n")
+    return (
+        f"The document has {len(sections)} sections. Categorise every one of them by its number.\n\n"
+        + "\n".join(lines)
+    )
+
+
+def _check_section_plan(result: dict[str, Any], numbers: set[int]) -> None:
+    given = [s["number"] for s in result["sections"]]
+    missing = numbers - set(given)
+    if missing:
+        raise ValueError(f"Sections {sorted(missing)!r} have no category")
+    unknown = set(given) - numbers
+    if unknown:
+        raise ValueError(f"Sections {sorted(unknown)!r} are not in the document")
+
+
+def _section_plan_feedback(error: ValueError) -> str:
+    return (
+        "\n\nIMPORTANT: a previous answer to this exact request was rejected with this "
+        f"error:\n{error}\nReturn exactly one category for every section number listed above."
+    )
+
+
+def _plan_long_document(
+    text: str, client, model: str
+) -> tuple[Optional[tuple[list[str], list[dict[str, Any]]]], list[Usage]]:
+    """(parts to extract, gaps for later-phase sections), or None when the
+    document has no usable numbered structure or nothing was classed as
+    platform behaviour; the caller then extracts it in one pass as before."""
+    sections = _numbered_sections(text)
+    if len(sections) < _MIN_SECTIONS_FOR_PARTS:
+        return None, []
+    numbers = {s.number for s in sections}
+    try:
+        result, usage = _call_until_valid(
+            lambda p: _call_with_tool(
+                SECTION_PLAN_SYSTEM_PROMPT, p, client, model, _SECTION_PLAN_TOOL, "record_section_plan"
+            ),
+            _build_section_plan_prompt(sections),
+            lambda r: _check_section_plan(r, numbers),
+            _section_plan_feedback,
+        )
+    except InvalidModelResponseError as e:
+        logger.warning("Section planning failed, extracting in one pass: %s", e)
+        return None, [e.usage]
+    except ValueError as e:
+        logger.warning("Section planning failed, extracting in one pass: %s", e)
+        return None, []
+
+    category = {s["number"]: s["category"] for s in result["sections"]}
+    included = set(EXTRACTION_SECTION_CATEGORIES)
+    extract = [s for s in sections if category[s.number] in included]
+    if not extract:
+        return None, [usage]
+    logger.info(
+        "Extracting %d of %d sections in parts: %s",
+        len(extract), len(sections), [s.number for s in extract],
+    )
+
+    later_phase_gaps = [
+        {
+            "description": (
+                f"Section {s.number} ({s.title}) describes later-phase scope. Confirm with the "
+                "client whether it is in scope before writing stories for it."
+            ),
+            "location": f"{s.number}. {s.title}",
+            "severity": "medium",
+        }
+        for s in sections
+        if category[s.number] == "later_phase"
+    ]
+    return (_pack_sections(extract), later_phase_gaps), [usage]
+
+
+def _pack_sections(sections: list[_Section]) -> list[str]:
+    """Consecutive sections, in document order, packed into parts of at most
+    EXTRACTION_PART_MAX_TOKENS; a single larger section is a part of its own."""
+    max_chars = EXTRACTION_PART_MAX_TOKENS * _CHARS_PER_TOKEN
+    parts: list[str] = []
+    current = ""
+    for section in sections:
+        if current and len(current) + len(section.text) > max_chars:
+            parts.append(current)
+            current = ""
+        current += section.text
+    if current:
+        parts.append(current)
+    return parts
+
+
+def _first_line(text: str) -> str:
+    return next((line.strip() for line in text.splitlines() if line.strip()), "")[:120]
+
+
+def _extract_in_parts(parts: list[str], client, model: str) -> tuple[dict[str, Any], list[Usage]]:
+    """Runs _extract_one on every part, EXTRACTION_PART_CONCURRENCY at a time,
+    and merges the results with fresh E{n}/S{n} ids. A part that still fails
+    after its retries becomes a high-severity gap naming where it starts, so
+    the PM sees exactly what to re-run or write by hand; the request fails
+    only if every part does."""
+
+    def run(index: int) -> tuple[dict[str, Any], list[Usage]]:
+        # Each part goes in exactly like a whole document. Measured on one part
+        # of a long RFP: introducing it as "one part of a long document", or
+        # adding a note to extract only that part, made the draft cover 1-5 of
+        # its 17 sections instead of all 17.
+        data, usages = _extract_one(parts[index], client, model)
+        validate_extraction(data, require_nonempty_epics=True)
+        return data, usages
+
+    with ThreadPoolExecutor(max_workers=max(1, EXTRACTION_PART_CONCURRENCY)) as pool:
+        futures = [pool.submit(run, i) for i in range(len(parts))]
+
+    results: list[dict[str, Any]] = []
+    usages: list[Usage] = []
+    failures: list[tuple[int, ValueError]] = []
+    for index, future in enumerate(futures):
+        try:
+            data, part_usages = future.result()
+        except ValueError as e:
+            logger.warning("Extraction of part %d/%d failed: %s", index + 1, len(parts), e)
+            if isinstance(e, InvalidModelResponseError):
+                usages.append(e.usage)
+            failures.append((index, e))
+            continue
+        results.append(data)
+        usages.extend(part_usages)
+
+    if not results:
+        raise failures[0][1]
+
+    merged = _merge_parts(results)
+    for index, _error in failures:
+        start = _first_line(parts[index])
+        merged["gaps"].append(
+            {
+                "description": (
+                    f"The part of the document starting at \"{start}\" could not be turned into "
+                    "stories automatically. Run the extraction again, or add its stories by hand."
+                ),
+                "location": start,
+                "severity": "high",
+            }
+        )
+    return merged, usages
+
+
+def _merge_parts(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Concatenates the parts in document order, renumbering epics E1, E2, ...
+    and stories S1, S2, ... so ids stay unique across parts."""
+    epics: list[dict[str, Any]] = []
+    stories: list[dict[str, Any]] = []
+    gaps: list[dict[str, Any]] = []
+    for data in results:
+        epic_ids: dict[str, str] = {}
+        for epic in data["epics"]:
+            epic_ids[epic["id"]] = f"E{len(epics) + 1}"
+            epics.append({**epic, "id": epic_ids[epic["id"]]})
+        for story in data["user_stories"]:
+            stories.append({**story, "id": f"S{len(stories) + 1}", "epic_id": epic_ids[story["epic_id"]]})
+        gaps.extend(data["gaps"])
+    return {"epics": epics, "user_stories": stories, "gaps": gaps}
 
 
 def extract_change_request(

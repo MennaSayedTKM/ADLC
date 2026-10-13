@@ -11,7 +11,11 @@ build brief (historical — some details changed during the build).
   `schemas/` (Pydantic), `db/` (SQLAlchemy models + session), `deps.py` (client getters)
 - `backend/migrations/` — Alembic; `backend/tests/` — pytest suite + demo seed scripts
 - `ai/ingest/` — PixelRAG render → tile → embed → FAISS (`ingest_file`) and FAISS + MMR search
-- `ai/text/` — PDF text-layer / DOCX extraction and the requirements extractor
+- `ai/text/` — PDF text-layer / DOCX extraction and the requirements extractor. Long documents
+  are split at section headings and extracted in parts, then merged; grouping epics into modules
+  and dropping repeated stories happen in code afterwards (`_ensure_epic_consolidation`), never in
+  the extraction prompts — prompt rules about grouping or what to skip made the draft stop early
+  (measured, see the comments there). Re-measure on a long real document after any prompt change.
 - `ai/text/ux_prompt_generator.py` — Figma Make prompt generation, "Lego" style: one **Platform
   Blueprint** per project (mode `foundation`, no epic: vision, design system, app shell, a
   nav placeholder per epic) and one prompt per epic (`new_feature` / `edit_existing`). Service:

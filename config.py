@@ -50,6 +50,10 @@ EXTRACTION_MAX_TOKENS = int(_require("extraction_max_tokens"))
 EPIC_TARGET_MIN_STORIES = int(_require("epic_target_min_stories"))
 EPIC_TARGET_MAX_STORIES = int(_require("epic_target_max_stories"))
 EPIC_CONSOLIDATION_MIN_EPICS = int(_require("epic_consolidation_min_epics"))
+EXTRACTION_SINGLE_PASS_MAX_TOKENS = int(_require("extraction_single_pass_max_tokens"))
+EXTRACTION_PART_MAX_TOKENS = int(_require("extraction_part_max_tokens"))
+EXTRACTION_PART_CONCURRENCY = int(_require("extraction_part_concurrency"))
+EXTRACTION_SECTION_CATEGORIES = [str(c) for c in _require("extraction_section_categories")]
 
 # Design alignment check
 ALIGNMENT_MODEL = str(_require("alignment_model"))
