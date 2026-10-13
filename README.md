@@ -44,7 +44,7 @@ frontend/  React + Vite UI  ──/api/*──►  backend/  FastAPI (port 8080)
 | `ai/text/` | Text-layer extraction for PDF/DOCX and the requirements extractor |
 | `ai/vision/` | GPT-4o vision: alignment checker, image transcription, answer synthesis |
 | `ai/embed_client.py` | `EmbedClient` for the embedding server (retry + `EmbedServerError`) |
-| `frontend/src/` | Pages: Requirements review, Design review, Standing policies |
+| `frontend/src/` | Guided-workflow UI: Projects home, Sources, Requirements, Design, Validate design, Publish & export, Company standards (see `frontend/README.md`) |
 | `config.yaml` / `config.py` | All tunable values (models, token limits, thresholds, cost rates) |
 | `embed_server/` | Colab notebook that runs the embedding server |
 | `CLAUDE.md` | Conventions and constraints for Claude Code sessions |
@@ -146,14 +146,21 @@ npm run dev --prefix frontend
 
 ## Workflow
 
-1. **Create a project** in the project bar.
-2. **Requirements** — upload a requirements doc, or stage several intake
-   resources (docs, whiteboard photos) and run extraction on them together.
-   Review the extracted epics/stories/AC and gaps, answer clarifying
-   questions, edit or add items, run an evaluation, then **Approve**.
-   Approval locks the version; further edits create a new version. Change
-   requests can be uploaded against an approved version.
-3. **UI/UX prompts** — built like blocks, from an *approved* version.
+The app opens on **Projects**, where each card shows its stage and what needs
+your attention. Inside a project, a six-step stepper (Add sources → Generate →
+Review → Approve → Design → Publish) is always visible, and the sidebar guide
+names the single next step.
+
+1. **Start a project** — "New project", or drop a document on *Start from any
+   document* (it becomes the project's first source).
+2. **Sources → Requirements** — add docs and whiteboard photos (the type of each
+   is guessed from its name and can be changed), optionally ask the client the
+   suggested questions, then **Generate requirements**. Review the epics, stories
+   and acceptance criteria, resolve or dismiss gaps, edit or add items, run the
+   quality check, then **Approve**. Approval locks the version; further edits
+   create a new version, and **Compare** shows what changed. Change requests can
+   be filed against an approved version.
+3. **Design (UI/UX prompts)** — built like blocks, from an *approved* version.
    First a **Platform blueprint**: the platform's vision and users, a style
    brief, and optional **reference websites** (the server reads their public
    HTML/CSS and extracts colors, fonts, radii and shadows, which you can edit).
@@ -168,10 +175,11 @@ npm run dev --prefix frontend
    project, in order**. Prompts can be edited, regenerated and copied, and are
    marked *Outdated* when a newer requirements version supersedes theirs.
    Nothing is sent to Figma.
-4. **Design review** — upload screen exports against the approved version.
-   Each screen gets an alignment report; click a screen to see it next to its
-   findings and mark each one resolved or dismissed.
-5. **Share** the approved version. **Export PDF** and **Publish to
+4. **Validate design** — upload screen exports against the approved version.
+   Each screen gets an alignment status and numbered pins on the screen mark
+   where each finding applies; mark each finding resolved or dismissed. The
+   headline percentage counts aligned screens fully and partial ones half.
+5. **Publish & export** the approved version. **Export PDF** and **Publish to
    Confluence** produce a business requirements document for stakeholders
    (scope, numbered business requirements, assumptions and dependencies,
    open issues, version history, sign-off). Each requirement shows its user
@@ -222,6 +230,7 @@ together — tiles are linked to documents by `document_id`.
 ## Scope (phase 1)
 
 Deliberately out of scope: live Jira/GitHub/Slack/Figma connectors
-(upload-only), automatic writes to external systems, a single numeric
-alignment score, development/QA/delivery modules, and multi-user auth. See
+(upload-only), automatic writes to external systems, development/QA/delivery
+modules, and multi-user auth (the UI shows disabled "Soon" placeholders for
+Jira, notifications and teammate invites). See
 `docs/phase1-brief.md` for the reasoning.

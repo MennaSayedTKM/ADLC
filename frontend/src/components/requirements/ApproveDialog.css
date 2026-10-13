@@ -1,0 +1,21 @@
+.approve-points {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.approve-points li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  color: var(--color-text-secondary);
+}
+.approve-points li > svg {
+  flex: none;
+  margin-top: 0.15rem;
+  color: var(--color-accent-text);
+}
+.approve-points strong {
+  color: var(--color-text);
+}

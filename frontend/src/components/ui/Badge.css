@@ -2,14 +2,15 @@
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.2rem 0.6rem;
+  padding: 0.15rem 0.6rem;
   border-radius: var(--radius-pill);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.01em;
   border: 1px solid transparent;
-  line-height: 1.4;
+  line-height: 1.5;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .badge--neutral {
@@ -21,7 +22,7 @@
 .badge--accent {
   background: var(--color-accent-soft);
   border-color: var(--color-accent-soft-border);
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 
 .badge--success {
@@ -40,4 +41,10 @@
   background: var(--color-danger-soft);
   border-color: var(--color-danger-soft-border);
   color: var(--color-danger);
+}
+
+.badge--info {
+  background: var(--color-info-soft);
+  border-color: var(--color-info-soft-border);
+  color: var(--color-info);
 }

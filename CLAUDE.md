@@ -46,7 +46,20 @@ build brief (historical — some details changed during the build).
   uvicorn process serving the API under `/api` and the built frontend at `/`
 - `.github/workflows/docker-publish.yml` — tests, builds and pushes the image to ECR on push to
   `main` (OIDC, no stored AWS keys). Tests must pass without a `.env` (CI has none).
-- `frontend/src/` — React + Vite + TypeScript; `api/client.ts` calls `/api/*`
+- `frontend/src/` — React + Vite + TypeScript; `api/client.ts` calls `/api/*`. Guided-workflow UI:
+  a left-nav shell, a six-step lifecycle stepper on every project page, and pages Projects home,
+  Overview, Sources, Requirements, Design, Validate design, Publish & export, Company standards,
+  Settings. See `frontend/README.md` for the layout and the rules below.
+  - Hash routing in `lib/router.ts` (no router dependency). `state/ProjectContext` loads a project's
+    sources/requirements/design once; the lifecycle stepper, "next best step" and every page read it.
+    Lifecycle state is **derived** (`lib/lifecycle.ts`), never stored.
+  - Long runs (generate requirements, check a design) live in `ProjectContext`, not in a page, so they
+    keep going if the user navigates away.
+  - Labels are task language ("Sources", "Company standards", "Generate requirements"); API names
+    (`intake_resources`, `standing_policies`) are unchanged.
+  - Accessibility is a requirement: text ≥ 4.5:1 contrast in **both** themes, nothing under 12px, status
+    never by colour alone (icon + label), visible focus, keyboard reachable. Use tokens from `index.css`,
+    not raw hex values, and no `opacity` on text.
 - `config.yaml` + `config.py` — every tunable value; `.env` — secrets
 
 ## Commands (run from repo root, Windows)
@@ -88,8 +101,10 @@ build brief (historical — some details changed during the build).
   outbound read is the PM-triggered, read-only fetch of a reference website's public HTML/CSS.
 - No automatic writes to external systems. Every AI output is advisory, and anything
   outbound (e.g. Confluence publish) needs an explicit user action.
-- No single numeric alignment score. Findings are categorical (`aligned` / `partial` /
-  `misaligned`) with textual recommendations, and are resolved or dismissed only by a person.
+- Findings stay categorical (`aligned` / `partial` / `misaligned`) with textual recommendations, and
+  are resolved or dismissed only by a person. The UI also shows a summary alignment percentage
+  (aligned screens count fully, partial half — `lib/design.ts`); it is a display aid derived from those
+  categories, never stored and never used to gate approval or publishing.
 - No multi-user auth or user management; single project at a time.
 - Development, QA and PM/delivery modules are later phases. Keep the data model open to them.
 

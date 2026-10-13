@@ -19,10 +19,13 @@ const CLASSIFICATIONS = ['Small', 'Medium', 'Large']
 interface ChangeRequestPanelProps {
   projectId: string
   onFiled: (result: ChangeRequestIngestResponse) => Promise<void>
+  /** Start with the form showing (used when the panel is already inside a dialog). */
+  defaultOpen?: boolean
+  onCancel?: () => void
 }
 
-export function ChangeRequestPanel({ projectId, onFiled }: ChangeRequestPanelProps) {
-  const [open, setOpen] = useState(false)
+export function ChangeRequestPanel({ projectId, onFiled, defaultOpen = false, onCancel }: ChangeRequestPanelProps) {
+  const [open, setOpen] = useState(defaultOpen)
   const [file, setFile] = useState<File | null>(null)
   const [requestType, setRequestType] = useState<CrRequestType | ''>('')
   const [classification, setClassification] = useState('')
@@ -40,6 +43,7 @@ export function ChangeRequestPanel({ projectId, onFiled }: ChangeRequestPanelPro
     setEstimatedCost('')
     setError(null)
     setOpen(false)
+    onCancel?.()
   }
 
   async function handleSubmit(e: React.FormEvent) {

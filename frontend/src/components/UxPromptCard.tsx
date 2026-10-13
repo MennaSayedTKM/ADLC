@@ -17,9 +17,13 @@ interface Props {
   prompt: UxPrompt
   onChanged: (prompt: UxPrompt) => void
   onDeleted: (promptId: string) => void
+  /** Inside an expanded step row: the row already shows the title and badges. */
+  embedded?: boolean
+  /** Called after the text was copied, so the step can be ticked off. */
+  onCopied?: () => void
 }
 
-export function UxPromptCard({ projectId, prompt, onChanged, onDeleted }: Props) {
+export function UxPromptCard({ projectId, prompt, onChanged, onDeleted, embedded = false, onCopied }: Props) {
   const saved = prompt.edited_text ?? prompt.prompt_text
   const [text, setText] = useState(saved)
   const [busy, setBusy] = useState(false)
@@ -48,6 +52,7 @@ export function UxPromptCard({ projectId, prompt, onChanged, onDeleted }: Props)
       await navigator.clipboard.writeText(text)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
+      onCopied?.()
     } catch {
       setError('Could not copy automatically — select the text and copy it manually.')
     }
@@ -90,21 +95,28 @@ export function UxPromptCard({ projectId, prompt, onChanged, onDeleted }: Props)
   }
 
   return (
-    <article className="ux-card">
-      <header className="ux-card__header">
-        <div className="ux-card__title">
-          {prompt.epic_external_id && <span className="ux-card__epic-id">{prompt.epic_external_id}</span>}
-          {prompt.epic_title ?? 'Platform blueprint'}
-        </div>
-        <div className="ux-card__badges">
-          <Badge tone="accent">{MODE_LABEL[prompt.mode]}</Badge>
-          {hasEdits && <Badge>Edited</Badge>}
-          {prompt.is_stale && <Badge tone="warning">Outdated</Badge>}
-        </div>
-      </header>
+    <article className={`ux-card ${embedded ? 'ux-card--embedded' : ''}`}>
+      {!embedded && (
+        <header className="ux-card__header">
+          <div className="ux-card__title">
+            {prompt.epic_external_id && <span className="ux-card__epic-id">{prompt.epic_external_id}</span>}
+            {prompt.epic_title ?? 'Platform blueprint'}
+          </div>
+          <div className="ux-card__badges">
+            <Badge tone="accent">{MODE_LABEL[prompt.mode]}</Badge>
+            {hasEdits && <Badge>Edited</Badge>}
+            {prompt.is_stale && <Badge tone="warning">Outdated</Badge>}
+          </div>
+        </header>
+      )}
 
       <p className="ux-card__meta">
-        {prompt.story_external_ids.length > 0 ? `Stories: ${prompt.story_external_ids.join(', ')}` : 'Whole platform'}
+        {embedded && (
+          <>
+            {hasEdits && <Badge>Edited</Badge>} {prompt.is_stale && <Badge tone="warning">Outdated</Badge>}{' '}
+          </>
+        )}
+        {prompt.story_external_ids.length > 0 ? `Covers ${prompt.story_external_ids.join(', ')}` : 'Whole platform'}
         {prompt.screens.length > 0 && ` · ${prompt.screens.length} ${prompt.screens.length === 1 ? 'screen' : 'screens'}`}
         {' · generated '}
         {new Date(prompt.created_at).toLocaleString()}

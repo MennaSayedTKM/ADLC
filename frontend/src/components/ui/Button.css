@@ -6,43 +6,63 @@
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   font-weight: 600;
+  line-height: 1.2;
   white-space: nowrap;
   text-decoration: none;
   cursor: pointer;
+  user-select: none;
   transition: background var(--transition-fast), border-color var(--transition-fast),
-    color var(--transition-fast), opacity var(--transition-fast);
+    color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast),
+    opacity var(--transition-fast);
 }
 
-.btn:disabled {
+/* Press feedback — subtle, and skipped for reduced-motion users via index.css */
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.55;
 }
 
 .btn--sm {
-  padding: 0.35rem 0.7rem;
-  font-size: 0.8125rem;
+  min-height: 2rem;
+  padding: 0.3rem 0.75rem;
+  font-size: var(--text-sm);
 }
 
 .btn--md {
-  padding: 0.55rem 1.1rem;
-  font-size: 0.875rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 1.1rem;
+  font-size: var(--text-base);
+}
+
+.btn--lg {
+  min-height: 3rem;
+  padding: 0.7rem 1.5rem;
+  font-size: var(--text-md);
+  border-radius: var(--radius-md);
 }
 
 .btn--primary {
-  background: var(--color-accent);
+  background: var(--gradient-accent);
   color: var(--color-text-on-accent);
+  box-shadow: var(--shadow-accent);
 }
 .btn--primary:hover:not(:disabled) {
-  background: var(--color-accent-hover);
+  filter: brightness(1.08);
 }
 
 .btn--secondary {
-  background: var(--color-surface);
+  background: var(--color-surface-raised);
   border-color: var(--color-border-strong);
   color: var(--color-text);
 }
 .btn--secondary:hover:not(:disabled) {
   background: var(--color-neutral-soft);
+  border-color: var(--color-accent-soft-border);
 }
 
 .btn--ghost {
@@ -61,4 +81,19 @@
 }
 .btn--danger:hover:not(:disabled) {
   background: var(--color-danger-soft-border);
+}
+
+.btn__spinner {
+  width: 0.95em;
+  height: 0.95em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 700ms linear infinite;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }

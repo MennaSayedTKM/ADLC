@@ -1,0 +1,87 @@
+.progress {
+  height: 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-neutral-soft);
+  overflow: hidden;
+}
+
+.progress__fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width var(--transition-base);
+}
+.progress__fill--accent {
+  background: var(--gradient-accent);
+}
+.progress__fill--success {
+  background: var(--color-success-solid);
+}
+.progress__fill--warning {
+  background: var(--color-warning-solid);
+}
+.progress__fill--danger {
+  background: var(--color-danger-solid);
+}
+
+.progress--indeterminate .progress__fill {
+  width: 38%;
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(270%);
+  }
+}
+
+.segments {
+  display: flex;
+  gap: 0.25rem;
+}
+.segments__bar {
+  flex: 1;
+  height: 0.25rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-strong);
+}
+.segments__bar--done {
+  background: var(--color-success-solid);
+}
+.segments__bar--current {
+  background: var(--gradient-accent);
+}
+
+.ring {
+  position: relative;
+  flex: none;
+}
+.ring__track {
+  stroke: var(--color-neutral-soft-border);
+}
+.ring__value {
+  transition: stroke-dashoffset var(--transition-base);
+}
+.ring__value--success {
+  stroke: var(--color-success-solid);
+}
+.ring__value--accent {
+  stroke: var(--color-accent);
+}
+.ring__value--warning {
+  stroke: var(--color-warning-solid);
+}
+.ring__value--danger {
+  stroke: var(--color-danger-solid);
+}
+.ring__label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}

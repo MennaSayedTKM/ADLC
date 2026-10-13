@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { PolicyDraft, StandingPolicy } from '../api/types'
-import { Badge } from '../components/ui/Badge'
+import { Banner } from '../components/ui/Banner'
 import { Button } from '../components/ui/Button'
+import { Icon } from '../components/ui/Icon'
+import { PageHeader } from '../components/ui/PageHeader'
+import { Panel } from '../components/ui/Panel'
+import { Toggle } from '../components/ui/Toggle'
+import { plural } from '../lib/format'
 import './StandingPoliciesPage.css'
 
+/** Company standards: baseline rules applied to every project unless the client's own documents say otherwise. */
 export function StandingPoliciesPage() {
   const [policies, setPolicies] = useState<StandingPolicy[] | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
@@ -13,7 +19,7 @@ export function StandingPoliciesPage() {
     api
       .listPolicies()
       .then(setPolicies)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load policies'))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load company standards'))
   }, [])
 
   function handleCreated(policy: StandingPolicy) {
@@ -24,32 +30,42 @@ export function StandingPoliciesPage() {
     setPolicies((prev) => prev?.map((p) => (p.id === updated.id ? updated : p)))
   }
 
-  return (
-    <div className="policies-page">
-      <div className="policies-page__header">
-        <h1 className="policies-page__title">Standing policies</h1>
-        <p className="policies-page__hint">
-          Baseline expectations that apply to any project by default — the standard things almost
-          every software project should get right regardless of client (accessibility, basic
-          security, data retention, error handling, and the like), not something specific to one
-          client or industry. When extraction runs, any active policy here is folded in as a
-          fallback only where the client's own material doesn't already address the same topic —
-          the client's material always wins.
-        </p>
-      </div>
+  const activeCount = policies?.filter((p) => p.is_active).length ?? 0
 
-      {error && <div className="policies-page__error">{error}</div>}
+  return (
+    <div className="page">
+      <PageHeader
+        title="Company standards"
+        description="Baseline expectations that apply to every project — accessibility, basic security, data retention, error handling and the like. Switch each one on or off."
+      />
+
+      <Banner tone="info">
+        <strong>Your client’s own documents always win.</strong> When requirements are generated, an active standard is
+        only applied where the client’s material doesn’t already cover the same topic.
+      </Banner>
+
+      {error && <Banner tone="danger">{error}</Banner>}
 
       {policies && (
-        <ul className="policies-page__list">
-          {policies.map((p) => (
-            <PolicyCard key={p.id} policy={p} onUpdated={handleUpdated} />
-          ))}
-          {policies.length === 0 && <p className="policies-page__empty">No standing policies yet.</p>}
-        </ul>
+        <Panel
+          title="Your standards"
+          description={`${plural(activeCount, 'standard')} switched on of ${policies.length}.`}
+        >
+          {policies.length === 0 ? (
+            <p className="policies-empty">No company standards yet. Add your first one below.</p>
+          ) : (
+            <ul className="policies-list">
+              {policies.map((p) => (
+                <PolicyCard key={p.id} policy={p} onUpdated={handleUpdated} />
+              ))}
+            </ul>
+          )}
+        </Panel>
       )}
 
-      <NewPolicyForm onCreated={handleCreated} />
+      <Panel title="Add a standard" description="Write it yourself, or describe the area and let AI draft it for you to review.">
+        <NewPolicyForm onCreated={handleCreated} />
+      </Panel>
     </div>
   )
 }
@@ -91,7 +107,7 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
       onCreated(policy)
       reset()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not add this policy')
+      setError(err instanceof Error ? err.message : 'Could not add this standard')
     } finally {
       setBusy(false)
     }
@@ -132,7 +148,7 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
           onClick={() => switchMode('ai')}
           disabled={busy}
         >
-          ✨ Add with AI
+          Draft with AI
         </button>
       </div>
 
@@ -140,14 +156,14 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
         <form onSubmit={handleSubmit}>
           <input
             className="policy-form__title-input"
-            placeholder="Policy title (e.g. Accessibility default)"
+            placeholder="Title (e.g. Accessibility default)"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             disabled={busy}
           />
           <textarea
             className="policy-form__text-input"
-            placeholder="Policy text — what applies by default when the client's own material is silent on this topic"
+            placeholder="What applies by default when the client’s own material is silent on this topic"
             value={policyText}
             onChange={(e) => setPolicyText(e.target.value)}
             disabled={busy}
@@ -155,7 +171,7 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
           />
           {error && <div className="policy-form__error">{error}</div>}
           <Button type="submit" variant="primary" size="sm" disabled={busy || !title.trim() || !policyText.trim()}>
-            {busy ? 'Adding…' : 'Add policy'}
+            {busy ? 'Adding…' : 'Add standard'}
           </Button>
         </form>
       )}
@@ -165,7 +181,7 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
           <textarea
             className="policy-form__text-input"
             autoFocus
-            placeholder="Describe the policy area — the AI will draft a title and concrete default (e.g. 'session timeout for inactivity')"
+            placeholder="Describe the area — the AI will draft a title and a concrete default (e.g. 'session timeout for inactivity')"
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             disabled={busy}
@@ -194,7 +210,7 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
             onChange={(e) => setTitle(e.target.value)}
             disabled={busy}
           />
-          <label className="policy-form__field-label">Policy text</label>
+          <label className="policy-form__field-label">Text</label>
           <textarea
             className="policy-form__text-input"
             value={policyText}
@@ -211,7 +227,7 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
               onClick={handleSubmit}
               disabled={busy || !title.trim() || !policyText.trim()}
             >
-              {busy ? 'Adding…' : 'Add policy'}
+              {busy ? 'Adding…' : 'Add standard'}
             </Button>
             <Button type="button" variant="secondary" size="sm" onClick={() => handleGenerate(true)} disabled={busy}>
               {busy ? 'Regenerating…' : 'Regenerate'}
@@ -257,7 +273,7 @@ function PolicyCard({
       const updated = await api.updatePolicy(policy.id, { is_active: !policy.is_active })
       onUpdated(updated)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not update this policy')
+      setError(err instanceof Error ? err.message : 'Could not update this standard')
     } finally {
       setBusy(false)
     }
@@ -266,17 +282,22 @@ function PolicyCard({
   return (
     <li className={`policy-card ${!policy.is_active ? 'policy-card--inactive' : ''}`}>
       <div className="policy-card__top">
+        <span className="policy-card__icon" aria-hidden="true">
+          <Icon name="shield" size={18} />
+        </span>
         {editing ? (
           <input
             className="policy-card__title-input"
             value={title}
+            aria-label="Standard title"
             onChange={(e) => setTitle(e.target.value)}
             disabled={busy}
           />
         ) : (
           <span className="policy-card__title">{policy.title}</span>
         )}
-        <Badge tone={policy.is_active ? 'success' : 'neutral'}>{policy.is_active ? 'Active' : 'Inactive'}</Badge>
+        <span className="policy-card__state">{policy.is_active ? 'On' : 'Off'}</span>
+        <Toggle checked={policy.is_active} onChange={handleToggleActive} disabled={busy || editing} label={`${policy.title} is ${policy.is_active ? 'on' : 'off'}`} />
       </div>
 
       {editing ? (
@@ -313,14 +334,9 @@ function PolicyCard({
             </Button>
           </>
         ) : (
-          <>
-            <Button variant="secondary" size="sm" onClick={() => setEditing(true)} disabled={busy}>
-              Edit
-            </Button>
-            <Button variant="ghost" size="sm" onClick={handleToggleActive} disabled={busy}>
-              {policy.is_active ? 'Deactivate' : 'Reactivate'}
-            </Button>
-          </>
+          <Button variant="ghost" size="sm" icon="edit" onClick={() => setEditing(true)} disabled={busy}>
+            Edit
+          </Button>
         )}
       </div>
     </li>

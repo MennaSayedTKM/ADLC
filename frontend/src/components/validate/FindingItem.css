@@ -1,0 +1,114 @@
+.finding {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.finding--active {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+.finding--closed {
+  opacity: 0.72;
+}
+.finding--closed .finding__issue {
+  text-decoration: line-through;
+}
+
+.finding__main {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+.finding__main:disabled {
+  cursor: default;
+}
+
+.finding__number {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  color: #1a1204;
+  font-size: var(--text-sm);
+  font-weight: 800;
+}
+.finding__number--partial {
+  background: #f5b942;
+}
+.finding__number--misaligned {
+  background: #ff7a7a;
+}
+.finding__number--aligned {
+  background: #3dd9a0;
+}
+.finding__number--none {
+  background: var(--color-neutral-soft);
+  border: 1px dashed var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+
+.finding__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.finding__tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.finding__no-region {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+.finding__issue {
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.finding__recommendation {
+  padding-left: calc(1.75rem + var(--space-3));
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+.finding__recommendation strong {
+  color: var(--color-text);
+}
+
+.finding__error {
+  padding-left: calc(1.75rem + var(--space-3));
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.finding__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-left: calc(1.75rem + var(--space-3));
+}
+.finding__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+.finding__story-link {
+  margin-left: auto;
+}

@@ -1,0 +1,41 @@
+.jira-preview {
+  border-style: dashed;
+  background: var(--color-surface-sunken);
+  box-shadow: none;
+}
+
+.jira-preview__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.jira-preview__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.jira-preview__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+.jira-preview__row > span:first-child {
+  flex: 1;
+}
+.jira-preview__to {
+  flex: 1;
+  color: var(--color-accent-text);
+  font-weight: 600;
+}
+
+.jira-preview__note {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}

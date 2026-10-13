@@ -1,0 +1,15 @@
+.drop-target {
+  position: relative;
+  border-radius: var(--radius-xl);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.drop-target--dragging {
+  border-color: var(--color-accent) !important;
+  background: var(--color-accent-soft) !important;
+  box-shadow: 0 0 0 4px var(--color-accent-soft);
+}
+
+.drop-target--disabled {
+  opacity: 0.6;
+}

@@ -1,0 +1,36 @@
+.diagrams {
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-7) var(--space-5);
+  text-align: center;
+}
+
+.diagrams__icon {
+  display: grid;
+  place-items: center;
+  width: 4rem;
+  height: 4rem;
+  border-radius: var(--radius-lg);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-soft-border);
+  color: var(--color-accent-text);
+}
+
+.diagrams__title {
+  font-size: var(--text-xl);
+}
+
+.diagrams__body {
+  max-width: 40rem;
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
+}
+
+.diagrams__hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+.diagrams__actions {
+  margin-top: var(--space-2);
+}

@@ -1,8 +1,11 @@
 import { useState, type JSX } from 'react'
 import { api } from '../api/client'
 import type { AcceptanceCriterion, ErrorHandlingEntry, ItemFields, RequirementItem, Scenario } from '../api/types'
+import { STORY_STATUS_LABEL, storyStatus } from '../lib/stories'
 import { ProvenanceBadge } from './ProvenanceBadge'
+import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
+import { Icon } from './ui/Icon'
 import './StoryRow.css'
 
 interface StoryRowProps {
@@ -11,6 +14,10 @@ interface StoryRowProps {
   onDelete: (itemId: string) => Promise<void>
   projectId: string
   docId: string
+  /** Where the story came from, e.g. "Onboarding_requirements_v2.docx · §4.1" — every story shows its source. */
+  sourceLabel?: string
+  expanded: boolean
+  onToggle: () => void
 }
 
 const TBD_PATTERN = /\[TBD[^\]]*\]/i
@@ -44,9 +51,8 @@ const AI_FIELD_LABEL: Record<AiField, string> = {
   error_handling: 'the error case you want handled',
 }
 
-export function StoryRow({ story, onSave, onDelete, projectId, docId }: StoryRowProps) {
+export function StoryRow({ story, onSave, onDelete, projectId, docId, sourceLabel, expanded, onToggle }: StoryRowProps) {
   const [editing, setEditing] = useState(false)
-  const [acExpanded, setAcExpanded] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -198,7 +204,7 @@ export function StoryRow({ story, onSave, onDelete, projectId, docId }: StoryRow
 
   if (editing) {
     return (
-      <li className="story-row story-row--editing">
+      <li className="story-row story-row--editing" id={`story-${story.external_id}`}>
         <span className="story-row__id">{story.external_id}</span>
         <div className="story-row__edit-body">
           <label className="story-row__field-label">Title</label>
@@ -352,89 +358,133 @@ export function StoryRow({ story, onSave, onDelete, projectId, docId }: StoryRow
     )
   }
 
+  const status = storyStatus(story)
+  const scenarioRefs = [...new Set(scenarios.map((s) => s.source_reference).filter((r): r is string => Boolean(r)))]
+
   return (
-    <li className="story-row" onClick={startEdit}>
-      <span className="story-row__id">{story.external_id}</span>
-      <div className="story-row__body">
-        <div className="story-row__title-row">
+    <li className={`story-row ${expanded ? 'story-row--expanded' : ''}`} id={`story-${story.external_id}`}>
+      <div
+        className="story-row__head"
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onToggle()
+          }
+        }}
+      >
+        <span className="story-row__id">{story.external_id}</span>
+        <div className="story-row__heading">
           <p className="story-row__text">{story.text}</p>
+          {story.description && <p className="story-row__description">{story.description}</p>}
+        </div>
+        <div className="story-row__badges">
           <ProvenanceBadge origin={story.origin} />
-          {tbdCount > 0 && <span className="story-row__tbd-badge">{tbdCount} need input</span>}
+          {tbdCount > 0 && <Badge tone="warning">{tbdCount} to fill in</Badge>}
+          <Badge tone={status === 'ready' ? 'success' : 'warning'} icon={status === 'ready' ? 'check' : 'alert'}>
+            {STORY_STATUS_LABEL[status]}
+          </Badge>
         </div>
-        {story.description && <p className="story-row__description">{story.description}</p>}
-
-        <div
-          className={`story-row__ac ${acCount === 0 ? 'story-row__ac--empty' : ''}`}
-          onClick={(e) => {
-            e.stopPropagation()
-            if (acCount > 0) setAcExpanded((v) => !v)
-            else startEdit()
-          }}
-        >
-          <span className={`story-row__ac-chevron ${acExpanded ? '' : 'story-row__ac-chevron--collapsed'}`}>
-            {acCount > 0 ? '▾' : ''}
-          </span>
-          <span className="story-row__ac-heading">
-            Acceptance criteria {acCount > 0 ? `(${acCount})` : '— none yet, click to add'}
-          </span>
-        </div>
-
-        {acExpanded && acCount > 0 && (
-          <ul className="story-row__ac-list">
-            {story.acceptance_criteria!.map((ac, i) => (
-              <li key={i} className={`story-row__ac-item ${ac.out_of_scope ? 'story-row__ac-item--out-of-scope' : ''}`}>
-                {ac.text}
-                {ac.out_of_scope && <span className="story-row__ac-badge">Out of scope</span>}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {scenarios.length > 0 && (
-          <div className="story-row__section">
-            <span className="story-row__section-heading">Scenarios ({scenarios.length})</span>
-            <ul className="story-row__scenario-list">
-              {scenarios.map((sc, i) => (
-                <li key={i} className="story-row__scenario-item">
-                  <p className="story-row__scenario-title">
-                    {sc.title}
-                    {sc.source_reference && (
-                      <span className="story-row__source-ref" title="Source reference">
-                        {sc.source_reference}
-                      </span>
-                    )}
-                  </p>
-                  <p>
-                    <span className="story-row__scenario-label">Given</span> {highlightTbd(sc.given)}
-                  </p>
-                  <p>
-                    <span className="story-row__scenario-label">When</span> {highlightTbd(sc.when)}
-                  </p>
-                  <p>
-                    <span className="story-row__scenario-label">Then</span> {highlightTbd(sc.then)}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {errorHandling.length > 0 && (
-          <div className="story-row__section">
-            <span className="story-row__section-heading">Error handling ({errorHandling.length})</span>
-            <ul className="story-row__eh-list">
-              {errorHandling.map((eh, i) => (
-                <li key={i} className="story-row__eh-item">
-                  <span className="story-row__eh-condition">{eh.condition}</span>
-                  <span className="story-row__eh-arrow">→</span>
-                  {highlightTbd(eh.message)}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <Icon name={expanded ? 'chevron-up' : 'chevron-right'} size={18} className="story-row__chevron" />
       </div>
-      <span className="story-row__edit-hint">Edit</span>
+
+      {expanded && (
+        <div className="story-row__details">
+          <section className="story-row__section">
+            <h4 className="story-row__section-heading">Acceptance criteria {acCount > 0 && <span>({acCount})</span>}</h4>
+            {acCount > 0 ? (
+              <ul className="story-row__ac-list">
+                {story.acceptance_criteria!.map((ac, i) => (
+                  <li key={i} className={`story-row__ac-item ${ac.out_of_scope ? 'story-row__ac-item--out-of-scope' : ''}`}>
+                    <Icon name={ac.out_of_scope ? 'x' : 'check'} size={15} strokeWidth={2.5} />
+                    <span>
+                      {ac.text}
+                      {ac.out_of_scope && <span className="story-row__ac-badge">Out of scope</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="story-row__missing">
+                <Icon name="alert" size={15} /> <em>Missing:</em> no acceptance criteria yet.
+                <button type="button" className="link-button" onClick={startEdit}>
+                  Add criterion
+                </button>
+              </p>
+            )}
+          </section>
+
+          {scenarios.length > 0 && (
+            <section className="story-row__section">
+              <h4 className="story-row__section-heading">Scenarios ({scenarios.length})</h4>
+              <ul className="story-row__scenario-list">
+                {scenarios.map((sc, i) => (
+                  <li key={i} className="story-row__scenario-item">
+                    <p className="story-row__scenario-title">
+                      {sc.title}
+                      {sc.source_reference && (
+                        <span className="story-row__source-ref" title="Source reference">
+                          {sc.source_reference}
+                        </span>
+                      )}
+                    </p>
+                    <p>
+                      <span className="story-row__scenario-label">Given</span> {highlightTbd(sc.given)}
+                    </p>
+                    <p>
+                      <span className="story-row__scenario-label">When</span> {highlightTbd(sc.when)}
+                    </p>
+                    <p>
+                      <span className="story-row__scenario-label">Then</span> {highlightTbd(sc.then)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {errorHandling.length > 0 && (
+            <section className="story-row__section">
+              <h4 className="story-row__section-heading">Error handling ({errorHandling.length})</h4>
+              <ul className="story-row__eh-list">
+                {errorHandling.map((eh, i) => (
+                  <li key={i} className="story-row__eh-item">
+                    <span className="story-row__eh-condition">{eh.condition}</span>
+                    <span className="story-row__eh-arrow">→</span>
+                    {highlightTbd(eh.message)}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <div className="story-row__footer">
+            <div className="story-row__sources">
+              {sourceLabel && (
+                <span className="story-row__source-chip" title="Where this story came from">
+                  <Icon name="link" size={13} /> Source: {sourceLabel}
+                </span>
+              )}
+              {scenarioRefs.map((ref) => (
+                <span key={ref} className="story-row__source-chip">
+                  <Icon name="shield" size={13} /> {ref}
+                </span>
+              ))}
+            </div>
+            <div className="story-row__actions">
+              <Button variant="ghost" size="sm" icon="message" disabled title="Comments — coming soon">
+                Comment
+              </Button>
+              <Button variant="secondary" size="sm" icon="edit" onClick={startEdit}>
+                Edit
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </li>
   )
 }

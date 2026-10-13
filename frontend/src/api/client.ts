@@ -40,20 +40,30 @@ export class ApiError extends Error {
   }
 }
 
+const UNREACHABLE = 'We couldn’t reach the server. Check your connection and try again.'
+const UNRESPONSIVE = 'The server isn’t responding right now. Please try again in a moment.'
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const isForm = options.body instanceof FormData
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers: isForm ? options.headers : { 'Content-Type': 'application/json', ...options.headers },
-  })
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...options,
+      headers: isForm ? options.headers : { 'Content-Type': 'application/json', ...options.headers },
+    })
+  } catch {
+    // fetch only rejects when no response arrived at all (offline, server down)
+    throw new ApiError(0, UNREACHABLE)
+  }
 
   if (!res.ok) {
-    let detail = res.statusText || `Request failed (${res.status})`
+    // A bare gateway status ("Bad Gateway") means the server never answered; say that in plain words.
+    let detail = [502, 503, 504].includes(res.status) ? UNRESPONSIVE : res.statusText || `Request failed (${res.status})`
     try {
       const data = await res.json()
-      if (typeof data?.detail === 'string') detail = data.detail
+      if (typeof data?.detail === 'string') detail = data.detail // the server's own explanation wins
     } catch {
-      // response wasn't JSON — fall back to statusText
+      // response wasn't JSON — keep the fallback above
     }
     throw new ApiError(res.status, detail)
   }
