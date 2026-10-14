@@ -321,7 +321,14 @@ export interface SitemapItem {
 export interface FeatureRelation {
   epic_external_id: string
   depends_on: string[]
+  depends_on_reasons?: Record<string, string> // epic external id -> why it is needed first
   integrates: { with_epic: string; how: string }[]
+}
+
+export interface StoryDependency {
+  story_external_id: string
+  depends_on: string // the story that has to exist first
+  reason: string
 }
 
 export interface RegistryScreen {
@@ -369,6 +376,8 @@ export interface UxPromptSources {
   epics_missing_from_blueprint: string[]
   has_design_system: boolean
   feature_map: FeatureRelation[]
+  story_dependencies: StoryDependency[]
+  has_dependency_map: boolean // false for a version approved before dependencies were worked out at approval
   suggested_order: string[] // epic external ids, dependencies first
   sitemap: SitemapItem[]
   registry: RegistryScreen[]

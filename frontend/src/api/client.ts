@@ -289,6 +289,8 @@ export const api = {
 
   getUxPromptSources: (projectId: string) =>
     request<UxPromptSources>(`/projects/${projectId}/ux-prompts/sources`),
+  workOutDependencies: (projectId: string) =>
+    request<UxPromptSources>(`/projects/${projectId}/ux-prompts/dependencies`, { method: 'POST' }),
 
   listUxPrompts: (projectId: string) => request<UxPrompt[]>(`/projects/${projectId}/ux-prompts`),
 

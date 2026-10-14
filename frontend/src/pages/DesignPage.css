@@ -335,3 +335,167 @@
   color: var(--color-text-tertiary);
   padding-top: 0.15rem;
 }
+
+/* ── dependencies between epics ──────────────────────────────── */
+.bulk-note--warn {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warning-soft-border);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+  color: var(--color-text);
+}
+.bulk-note--warn > svg {
+  flex: none;
+  margin-top: 0.15rem;
+  color: var(--color-warning);
+}
+.bulk-note--warn > span {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.deps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+.deps--empty {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+}
+.deps__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 650;
+}
+.deps__title svg {
+  color: var(--color-accent-text);
+}
+.deps__none {
+  color: var(--color-text-secondary);
+}
+.deps__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.deps__label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+.deps__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.deps__item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.deps__item--how {
+  align-items: flex-start;
+}
+.deps__item--how > svg {
+  margin-top: 0.2rem;
+}
+.deps__item .link-button {
+  margin: 0;
+  font-size: var(--text-base);
+  text-align: left;
+}
+.deps__ok {
+  flex: none;
+  color: var(--color-success);
+}
+.deps__warn {
+  flex: none;
+  color: var(--color-warning);
+}
+.deps__muted {
+  flex: none;
+  color: var(--color-text-tertiary);
+}
+.deps__state {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+.deps__how {
+  color: var(--color-text-secondary);
+}
+.deps__stated {
+  padding-left: 1.1rem;
+  list-style: disc;
+  color: var(--color-text-secondary);
+}
+
+.story-picker__hint {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* "Work out dependencies" for a version approved before they were worked out at approval. */
+.bulk-note--action {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+.bulk-note--action > svg {
+  flex: none;
+  color: var(--color-text-secondary);
+}
+.bulk-note--action > span {
+  flex: 1;
+  min-width: 14rem;
+}
+
+/* What a story needs first, under its checkbox in the story picker. */
+.story-picker__needs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2) calc(1.25rem + var(--space-2));
+  font-size: var(--text-sm);
+}
+.story-picker__need {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  color: var(--color-text-secondary);
+}
+.story-picker__need > svg {
+  flex: none;
+  margin-top: 0.15rem;
+  color: var(--color-success);
+}
+.story-picker__need--warn > svg {
+  color: var(--color-warning);
+}
+.story-picker__need > span:first-of-type {
+  flex: 1;
+  min-width: 12rem;
+}
+.story-picker__reason {
+  color: var(--color-text-secondary);
+}
+.story-picker__need-state {
+  color: var(--color-text-tertiary);
+}

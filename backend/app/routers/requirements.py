@@ -6,6 +6,7 @@ backend/app/services/{text_ingestion,requirements_extraction,
 requirements_review}.py for the logic this router calls into.
 """
 
+import logging
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -41,6 +42,7 @@ from ..services import confluence_export
 from ..services import requirements_review as review
 from ..services.confluence_client import ConfluenceError
 from ..services import use_case_diagrams
+from ..services import ux_prompts
 from ..services.business_document import build_business_document
 from ..services.pdf_export import generate_business_pdf, generate_requirements_pdf
 from ..services.requirements_evaluation import run_evaluation
@@ -56,6 +58,8 @@ from ..services.text_ingestion import create_text_document
 # db.session (imported above) already put the repo root on sys.path, so this
 # resolves the same way config.py does everywhere else in the app.
 from config import EXTRACTION_MODEL  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/requirements", tags=["requirements"])
 
@@ -724,13 +728,26 @@ def publish_confluence(
 
 
 @router.post("/{doc_id}/approve", response_model=DocumentOut)
-def approve(project_id: str, doc_id: str, db: Session = Depends(get_db)):
+def approve(
+    project_id: str,
+    doc_id: str,
+    db: Session = Depends(get_db),
+    llm_client=Depends(get_optional_openai_client),
+):
     doc = _get_requirement_doc_or_404(db, project_id, doc_id)
     try:
         review.approve_document(db, doc)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     db.flush()
+    # Which epics and stories depend on which, so the Design page can show the
+    # order to generate prompts in straight away. Advisory: if it fails the
+    # approval still stands, and the Design page offers to work it out again.
+    if llm_client is not None:
+        try:
+            ux_prompts.compute_dependency_map(db, doc, llm_client)
+        except Exception as e:
+            logger.warning("Dependency map for document %s failed: %s", doc.id, e)
     db.refresh(doc)
     return doc
 

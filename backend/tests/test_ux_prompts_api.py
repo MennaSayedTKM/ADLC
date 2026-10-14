@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.db.models import AiCall, Document, Project, RequirementItem, UxPrompt
 from app.db.session import get_session
-from app.deps import get_openai_client
+from app.deps import get_openai_client, get_optional_openai_client
 from app.main import app
 from app.services import requirements_review as review
 from app.services import style_reference
@@ -51,6 +51,7 @@ class FakeLLM:
 
     def __init__(self, relations=None):
         self.relations = relations or []
+        self.story_relations = []
         self.client = MagicMock()
         self.client.chat.completions.create.side_effect = self._create
 
@@ -60,7 +61,7 @@ class FakeLLM:
             return _response(content="Table screen with a filter bar and a 'New item' button.")
         name = tools[0]["function"]["name"]
         if name == "record_feature_relationships":
-            return _response({"features": self.relations}, name)
+            return _response({"features": self.relations, "story_dependencies": self.story_relations}, name)
         if name == "record_vision":
             return _response({"vision": "A calm strategy tool.", "target_users": "Strategy Office"}, name)
 
@@ -108,6 +109,7 @@ class FakeLLM:
 def llm():
     fake = FakeLLM()
     app.dependency_overrides[get_openai_client] = lambda: fake.client
+    app.dependency_overrides[get_optional_openai_client] = lambda: fake.client
     yield fake
     app.dependency_overrides.clear()
 
@@ -567,3 +569,98 @@ def test_style_extraction_endpoint_refuses_internal_addresses(client, project_id
         json={"url": "http://169.254.170.2/v2/credentials"},
     )
     assert r.status_code == 422
+
+
+# ── Dependencies worked out at approval ──────────────────────────────────────
+# Confirmed live: dependencies were only worked out with the blueprint, and the
+# "never guess" prompt found one dependency among 11 epics. They are now worked
+# out when a version is approved, with reasons, and between stories too.
+
+def _relations_with_reasons(llm):
+    llm.relations = [
+        {"epic_external_id": "E1", "depends_on": [], "integrates": []},
+        {"epic_external_id": "E2", "depends_on": [{"epic": "E1", "reason": "reports on the hierarchy created in E1"}],
+         "integrates": []},
+    ]
+    llm.story_relations = [
+        {"story": "S2", "depends_on": "S1", "reason": "edits the hierarchy S1 creates"},
+        {"story": "S3", "depends_on": "S1", "reason": "the report lists hierarchy items"},
+        {"story": "S3", "depends_on": "S3", "reason": "self - dropped"},
+        {"story": "S9", "depends_on": "S1", "reason": "unknown story - dropped"},
+        {"story": "S2", "depends_on": "S1", "reason": "duplicate - dropped"},
+    ]
+
+
+def test_approving_a_version_works_out_its_dependencies(client, project_id, llm):
+    _relations_with_reasons(llm)
+    ids = _seed(project_id, approved=False)
+
+    r = client.post(f"/projects/{project_id}/requirements/{ids['doc']}/approve")
+    assert r.status_code == 200, r.text
+
+    body = _sources(client, project_id)
+    assert body["has_dependency_map"] is True
+    assert body["has_blueprint"] is False  # no blueprint needed any more
+    e2 = next(f for f in body["feature_map"] if f["epic_external_id"] == "E2")
+    assert e2["depends_on"] == ["E1"]
+    assert e2["depends_on_reasons"] == {"E1": "reports on the hierarchy created in E1"}
+    assert body["suggested_order"] == ["E1", "E2"]
+    assert [(d["story_external_id"], d["depends_on"]) for d in body["story_dependencies"]] == [("S2", "S1"), ("S3", "S1")]
+    assert body["story_dependencies"][0]["reason"] == "edits the hierarchy S1 creates"
+    assert len(_ai_calls(project_id)) == 1
+
+
+def test_approval_stands_when_the_dependency_call_fails(client, project_id, llm):
+    ids = _seed(project_id, approved=False)
+    llm.client.chat.completions.create.side_effect = RuntimeError("OpenAI is down")
+
+    r = client.post(f"/projects/{project_id}/requirements/{ids['doc']}/approve")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["approval_status"] == "approved"
+    assert _sources(client, project_id)["has_dependency_map"] is False
+
+
+def test_dependencies_can_be_worked_out_for_a_version_approved_earlier(client, project_id, llm):
+    _relations_with_reasons(llm)
+    _seed(project_id)  # approved before dependencies were stored per version
+    assert _sources(client, project_id)["has_dependency_map"] is False
+
+    r = client.post(f"/projects/{project_id}/ux-prompts/dependencies")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["has_dependency_map"] is True
+    assert r.json()["suggested_order"] == ["E1", "E2"]
+    assert _sources(client, project_id)["story_dependencies"]
+
+
+def test_working_out_dependencies_needs_an_approved_version(client, project_id):
+    _seed(project_id, approved=False)
+    r = client.post(f"/projects/{project_id}/ux-prompts/dependencies")
+    assert r.status_code == 409
+
+
+def test_blueprint_reuses_the_dependencies_worked_out_at_approval(client, project_id, llm):
+    _relations_with_reasons(llm)
+    ids = _seed(project_id, approved=False)
+    client.post(f"/projects/{project_id}/requirements/{ids['doc']}/approve")
+    calls_after_approval = llm.call_count
+
+    assert _blueprint(client, project_id, ids).status_code == 201
+
+    relationship_calls = [
+        c for c in llm.client.chat.completions.create.call_args_list[calls_after_approval:]
+        if c.kwargs.get("tools") and c.kwargs["tools"][0]["function"]["name"] == "record_feature_relationships"
+    ]
+    assert relationship_calls == []
+    assert _sources(client, project_id)["suggested_order"] == ["E1", "E2"]
+
+
+def test_the_relationship_prompt_asks_for_reasons_and_story_dependencies(client, project_id, llm):
+    from ai.text.ux_prompt_generator import _RELATIONSHIPS_SYSTEM_PROMPT, _RELATIONSHIPS_TOOL
+
+    assert "an empty list is a correct answer" not in _RELATIONSHIPS_SYSTEM_PROMPT
+    assert "story_dependencies" in _RELATIONSHIPS_SYSTEM_PROMPT
+    params = _RELATIONSHIPS_TOOL["function"]["parameters"]
+    assert params["required"] == ["features", "story_dependencies"]
+    assert "reason" in params["properties"]["features"]["items"]["properties"]["depends_on"]["items"]["properties"]

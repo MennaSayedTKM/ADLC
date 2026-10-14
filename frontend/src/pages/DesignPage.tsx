@@ -87,17 +87,36 @@ export function DesignPage() {
   return <DesignPrompts />
 }
 
+/** Where a story another story needs stands, from the point of view of the prompt being set up. */
+type StoryNeedState = 'covered' | 'selected' | 'unticked' | 'missing'
+
+interface StoryNeed {
+  id: string
+  title: string
+  reason: string
+  state: StoryNeedState
+}
+
+const STORY_NEED_LABEL: Record<StoryNeedState, string> = {
+  covered: 'already has a prompt',
+  selected: 'in this prompt',
+  unticked: 'not ticked',
+  missing: 'no prompt yet',
+}
+
 /** Tick the stories a prompt should cover. Everything is ticked by default. */
 function StoryPicker({
   stories,
   excluded,
   disabled,
+  needsOf,
   onToggle,
   onSetAll,
 }: {
   stories: RequirementItem[]
   excluded: Set<string>
   disabled: boolean
+  needsOf: (story: RequirementItem) => StoryNeed[]
   onToggle: (storyId: string) => void
   onSetAll: (stories: RequirementItem[], selected: boolean) => void
 }) {
@@ -116,17 +135,152 @@ function StoryPicker({
         </button>
       </div>
       <ul className="story-picker__list">
-        {stories.map((story) => (
-          <li key={story.id}>
-            <label className="story-picker__item">
-              <input type="checkbox" checked={!excluded.has(story.id)} onChange={() => onToggle(story.id)} />
-              <span className="story-picker__id">{story.external_id}</span>
-              <span>{story.text}</span>
-            </label>
-          </li>
-        ))}
+        {stories.map((story) => {
+          const needs = needsOf(story)
+          return (
+            <li key={story.id}>
+              <label className="story-picker__item">
+                <input type="checkbox" checked={!excluded.has(story.id)} onChange={() => onToggle(story.id)} />
+                <span className="story-picker__id">{story.external_id}</span>
+                <span>{story.text}</span>
+              </label>
+              {needs.length > 0 && (
+                <ul className="story-picker__needs">
+                  {needs.map((need) => {
+                    const ok = need.state === 'covered' || need.state === 'selected'
+                    return (
+                      <li key={need.id} className={`story-picker__need ${ok ? '' : 'story-picker__need--warn'}`}>
+                        <Icon name={ok ? 'check-circle' : 'alert'} size={14} />
+                        <span>
+                          Needs <strong>{need.id}</strong> {need.title}
+                          {need.reason && <span className="story-picker__reason"> — {need.reason}</span>}
+                        </span>
+                        <span className="story-picker__need-state">{STORY_NEED_LABEL[need.state]}</span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </li>
+          )
+        })}
       </ul>
+      <p className="story-picker__hint">
+        Stories ticked together share one prompt, so pick the ones that belong on the same screens. “Needs” marks a story
+        that builds on another one: generate that story first, or tick both so they share a prompt.
+      </p>
     </fieldset>
+  )
+}
+
+interface DependencyItem {
+  id: string
+  title: string
+  ready: boolean
+  reason?: string
+}
+
+/** Why an epic sits where it does in the order: what it needs first, what builds on it, what it touches. */
+function DependencyInfo({
+  needs,
+  unlocks,
+  alongside,
+  stated,
+  hasFeatureMap,
+  onOpen,
+}: {
+  needs: DependencyItem[]
+  unlocks: DependencyItem[]
+  alongside: { id: string; title: string; how: string }[]
+  stated: string[]
+  hasFeatureMap: boolean
+  onOpen: (id: string) => void
+}) {
+  if (!hasFeatureMap && stated.length === 0) {
+    return (
+      <p className="deps deps--empty">
+        <Icon name="branch" size={16} /> How this epic depends on the others hasn’t been worked out for this version yet.
+        Use “Work out dependencies” above the list.
+      </p>
+    )
+  }
+
+  const nothing = needs.length === 0 && unlocks.length === 0 && alongside.length === 0
+  return (
+    <div className="deps">
+      <p className="deps__title">
+        <Icon name="branch" size={16} /> How this epic fits with the others
+      </p>
+
+      {hasFeatureMap && nothing && <p className="deps__none">It doesn’t depend on another epic — it can be generated at any point after the blueprint.</p>}
+
+      {needs.length > 0 && (
+        <div className="deps__group">
+          <p className="deps__label">Generate these first</p>
+          <ul className="deps__list">
+            {needs.map((item) => (
+              <li key={item.id} className="deps__item deps__item--how">
+                <Icon name={item.ready ? 'check-circle' : 'alert'} size={16} className={item.ready ? 'deps__ok' : 'deps__warn'} />
+                <span>
+                  <button type="button" className="link-button" onClick={() => onOpen(item.id)}>
+                    {item.id} · {item.title}
+                  </button>
+                  {item.reason && <span className="deps__how"> — {item.reason}</span>}
+                </span>
+                <span className="deps__state">{item.ready ? 'prompt ready' : 'not generated yet'}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {unlocks.length > 0 && (
+        <div className="deps__group">
+          <p className="deps__label">Builds on this one</p>
+          <ul className="deps__list">
+            {unlocks.map((item) => (
+              <li key={item.id} className="deps__item">
+                <Icon name="arrow-right" size={16} className="deps__muted" />
+                <button type="button" className="link-button" onClick={() => onOpen(item.id)}>
+                  {item.id} · {item.title}
+                </button>
+                <span className="deps__state">{item.ready ? 'prompt ready' : 'comes after'}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {alongside.length > 0 && (
+        <div className="deps__group">
+          <p className="deps__label">Works alongside</p>
+          <ul className="deps__list">
+            {alongside.map((item) => (
+              <li key={item.id} className="deps__item deps__item--how">
+                <Icon name="link" size={16} className="deps__muted" />
+                <span>
+                  <button type="button" className="link-button" onClick={() => onOpen(item.id)}>
+                    {item.id} · {item.title}
+                  </button>
+                  <span className="deps__how"> — {item.how}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {stated.length > 0 && (
+        <div className="deps__group">
+          <p className="deps__label">Stated in your requirements</p>
+          <ul className="deps__stated">
+            {stated.map((text, i) => (
+              <li key={i}>{text}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -143,6 +297,7 @@ function DesignPrompts() {
   // Epics ticked for "generate several at once", and stories the person unticked.
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
+  const [mappingDeps, setMappingDeps] = useState(false)
 
   if (loading && !sources) return <p className="page-status">Loading…</p>
 
@@ -202,6 +357,75 @@ function DesignPrompts() {
   const style = styleSummary(sources)
   const canGenerateFeatures = sources.has_blueprint || sources.has_design_system
   const busy = generating !== null || bulk !== null
+
+  // Dependencies between epics and between stories are worked out when the version is approved
+  // (or on request, for versions approved before that). They explain the numbering: each prompt
+  // reuses the screens of the ones before it, so what an epic depends on goes first.
+  const hasFeatureMap = sources.has_dependency_map || sources.feature_map.length > 0
+  const relations = new Map(sources.feature_map.map((f) => [f.epic_external_id, f]))
+  const reasonFor = (id: string, dep: string) => relations.get(id)?.depends_on_reasons?.[dep] ?? ''
+
+  // Story-level dependencies, by external id.
+  const storyIndex = new Map(
+    sources.epics.flatMap((e) => e.stories.map((s) => [s.external_id, { story: s, epic: e.epic.external_id }] as const)),
+  )
+  const storyNeeds = new Map<string, { depends_on: string; reason: string }[]>()
+  for (const dep of sources.story_dependencies) {
+    storyNeeds.set(dep.story_external_id, [...(storyNeeds.get(dep.story_external_id) ?? []), dep])
+  }
+  const coveredAnywhere = new Set(prompts.flatMap((p) => p.story_ids))
+  const rowByKey = new Map(rows.map((r) => [r.key, r]))
+  const hasPrompt = (id: string) => (rowByKey.get(id)?.prompts.length ?? 0) > 0
+  const dependsOn = (id: string) => relations.get(id)?.depends_on ?? []
+  const usedBy = (id: string) => sources.feature_map.filter((f) => f.depends_on.includes(id)).map((f) => f.epic_external_id)
+  const titleOf = (id: string) => rowByKey.get(id)?.title ?? id
+
+  /** Everything this epic depends on (directly or not) that has no prompt yet, in the order to generate it. */
+  function missingChain(id: string, seen = new Set<string>()): string[] {
+    const out: string[] = []
+    for (const dep of dependsOn(id)) {
+      if (seen.has(dep) || hasPrompt(dep)) continue
+      seen.add(dep)
+      out.push(...missingChain(dep, seen), dep)
+    }
+    return out
+  }
+
+  /** What each story in this row needs first, and where that story stands for the prompt being set up. */
+  function needsOf(row: StepRow) {
+    return (story: RequirementItem): StoryNeed[] =>
+      (storyNeeds.get(story.external_id) ?? []).flatMap((dep) => {
+        const target = storyIndex.get(dep.depends_on)
+        if (!target) return []
+        const inThisRow = target.epic === row.epicExternalId
+        const state: StoryNeedState = coveredAnywhere.has(target.story.id)
+          ? 'covered'
+          : inThisRow && !excluded.has(target.story.id)
+            ? 'selected'
+            : inThisRow
+              ? 'unticked'
+              : 'missing'
+        return [{ id: dep.depends_on, title: target.story.text, reason: dep.reason, state }]
+      })
+  }
+
+  async function workOutDependencies() {
+    setMappingDeps(true)
+    setGenError(null)
+    try {
+      await api.workOutDependencies(project.id)
+      await refreshSources()
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : 'Could not work out the dependencies')
+    } finally {
+      setMappingDeps(false)
+    }
+  }
+
+  function openRow(id: string) {
+    setOpenKey(id)
+    window.setTimeout(() => document.getElementById(`step-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60)
+  }
 
   // One progress unit per prompt, plus one for every row that has none yet.
   const units = rows.flatMap((r) => (r.prompts.length > 0 ? r.prompts.map((p) => pasted.has(p.id)) : [false]))
@@ -268,10 +492,10 @@ function DesignPrompts() {
     }
   }
 
-  // One request per epic, in the order shown: each prompt is generated knowing the screens the
-  // previous ones created. A failure doesn't stop the rest.
-  async function generateSelected() {
-    const chosen = rows.filter((r) => r.epicExternalId && picked.has(r.key) && pendingStories(r).length > 0)
+  // One request per epic, in the order given: each prompt is generated knowing the screens the
+  // previous ones created, so callers pass prerequisites first. A failure doesn't stop the rest.
+  async function runBatch(candidates: StepRow[]) {
+    const chosen = candidates.filter((r) => r.epicExternalId && pendingStories(r).length > 0)
     if (chosen.length === 0) return
     setBulk({ done: 0, total: chosen.length })
     setGenError(null)
@@ -290,9 +514,18 @@ function DesignPrompts() {
     if (failed.length > 0) setGenError(failed.join(' · '))
   }
 
+  // `rows` is already in dependency order, so a selection runs prerequisites first.
+  const generateSelected = () => runBatch(rows.filter((r) => picked.has(r.key)))
+
+  const generateWithDependencies = (row: StepRow) =>
+    runBatch([...missingChain(row.key).flatMap((id) => rowByKey.get(id) ?? []), row])
+
   const pickableRows = rows.filter((r) => r.epicExternalId)
   const readyToPick = pickableRows.filter((r) => pendingStories(r).length > 0)
-  const selectedCount = readyToPick.filter((r) => picked.has(r.key)).length
+  const selectedRows = readyToPick.filter((r) => picked.has(r.key))
+  const selectedCount = selectedRows.length
+  // Epics in the selection depend on epics that have no prompt and aren't selected.
+  const missingForSelection = [...new Set(selectedRows.flatMap((r) => missingChain(r.key)))].filter((id) => !picked.has(id))
 
   return (
     <div className="page">
@@ -372,6 +605,35 @@ function DesignPrompts() {
       {!canGenerateFeatures && (
         <p className="bulk-note">Set up the platform blueprint first — every feature is built to fit it.</p>
       )}
+      {missingForSelection.length > 0 && (
+        <p className="bulk-note bulk-note--warn">
+          <Icon name="alert" size={16} />
+          <span>
+            <strong>{missingForSelection.map(titleOf).join(', ')}</strong> must be generated first, because the epics you
+            picked depend on {missingForSelection.length === 1 ? 'it' : 'them'}.
+          </span>
+          <button type="button" className="link-button" onClick={() => setPicked((prev) => new Set([...prev, ...missingForSelection]))}>
+            Add {missingForSelection.length === 1 ? 'it' : 'them'} to the batch
+          </button>
+        </p>
+      )}
+      {hasFeatureMap ? (
+        <p className="bulk-note">
+          Numbered in the order to generate: an epic comes after the epics it depends on, because each prompt reuses the
+          screens designed before it. Open an epic to see why, and which of its stories build on others.
+        </p>
+      ) : (
+        <p className="bulk-note bulk-note--action">
+          <Icon name="branch" size={16} />
+          <span>
+            This version was approved before dependencies were worked out automatically, so the order below is just the
+            epic numbering.
+          </span>
+          <Button variant="secondary" size="sm" icon="sparkles" loading={mappingDeps} disabled={busy || mappingDeps} onClick={workOutDependencies}>
+            Work out dependencies
+          </Button>
+        </p>
+      )}
 
       <ol className="step-list">
         {rows.map((row, index) => {
@@ -382,8 +644,14 @@ function DesignPrompts() {
           const uncovered = row.stories.filter((s) => !covered.has(s.id))
           const pending = pendingStories(row)
           const rowBusy = generating === row.key
+          const needs = dependsOn(row.key)
+          const missing = missingChain(row.key)
+          const storyNeedsOf = needsOf(row)
+          const blockedStories = pending.filter((s) =>
+            storyNeedsOf(s).some((n) => n.state === 'missing' || n.state === 'unticked'),
+          )
           return (
-            <li key={row.key} className={`step-row ${open ? 'step-row--open' : ''}`}>
+            <li key={row.key} id={`step-${row.key}`} className={`step-row ${open ? 'step-row--open' : ''}`}>
               <div className="step-row__head">
                 {isEpic && (
                   <input
@@ -421,6 +689,11 @@ function DesignPrompts() {
                           : `${row.stories.length - uncovered.length} of ${row.stories.length} stories covered`}
                     </Badge>
                   )}
+                  {needs.length > 0 && (
+                    <Badge tone={missing.length === 0 ? 'success' : 'warning'} icon={missing.length === 0 ? 'check' : 'alert'}>
+                      After {needs.join(', ')}
+                    </Badge>
+                  )}
                   {row.prompts.some((p) => p.is_stale) && <Badge tone="warning" icon="alert">Outdated</Badge>}
                   {row.prompts.length === 0 ? (
                     <Badge>Not generated</Badge>
@@ -435,6 +708,17 @@ function DesignPrompts() {
 
               {open && (
                 <div className="step-row__body">
+                  {isEpic && (
+                    <DependencyInfo
+                      needs={needs.map((id) => ({ id, title: titleOf(id), ready: hasPrompt(id), reason: reasonFor(row.key, id) }))}
+                      unlocks={usedBy(row.key).map((id) => ({ id, title: titleOf(id), ready: hasPrompt(id) }))}
+                      alongside={(relations.get(row.key)?.integrates ?? []).map((i) => ({ id: i.with_epic, title: titleOf(i.with_epic), how: i.how }))}
+                      stated={epicByExternalId.get(row.key)?.epic.dependencies ?? []}
+                      hasFeatureMap={hasFeatureMap}
+                      onOpen={openRow}
+                    />
+                  )}
+
                   {row.prompts.map((prompt, n) => (
                     <div key={prompt.id} className="step-row__prompt">
                       {row.prompts.length > 1 && <p className="step-row__prompt-title">Prompt {n + 1} of {row.prompts.length}</p>}
@@ -463,18 +747,54 @@ function DesignPrompts() {
                             : 'Set up the platform blueprint first — every feature is built to fit it.'
                           : `${plural(uncovered.length, 'story', 'stories')} not covered by an earlier prompt. Generate another prompt for them.`}
                       </p>
-                      <StoryPicker stories={uncovered} excluded={excluded} disabled={rowBusy} onToggle={toggleStory} onSetAll={setStories} />
+                      {missing.length > 0 && (
+                        <Banner tone="warning">
+                          <strong>Generate {missing.map(titleOf).join(', ')} first.</strong> This feature depends on{' '}
+                          {missing.length === 1 ? 'it' : 'them'}, and every prompt reuses the screens designed before it —
+                          generated out of order, it may invent screens that already exist elsewhere.
+                        </Banner>
+                      )}
+                      {missing.length === 0 && blockedStories.length > 0 && (
+                        <Banner tone="warning">
+                          <strong>
+                            {blockedStories.map((s) => s.external_id).join(', ')}{' '}
+                            {blockedStories.length === 1 ? 'builds' : 'build'} on stories that have no prompt yet.
+                          </strong>{' '}
+                          Generate those first, or tick them here so they share this prompt — each story is marked below.
+                        </Banner>
+                      )}
+                      <StoryPicker
+                        stories={uncovered}
+                        excluded={excluded}
+                        disabled={rowBusy}
+                        needsOf={storyNeedsOf}
+                        onToggle={toggleStory}
+                        onSetAll={setStories}
+                      />
                       <div className="step-row__generate-actions">
+                        {missing.length > 0 && (
+                          <Button
+                            variant="primary"
+                            icon="sparkles"
+                            loading={bulk !== null}
+                            disabled={!canGenerateFeatures || busy || pending.length === 0}
+                            onClick={() => generateWithDependencies(row)}
+                          >
+                            Generate {plural(missing.length + 1, 'prompt')} in order
+                          </Button>
+                        )}
                         <Button
-                          variant="primary"
-                          icon="sparkles"
+                          variant={missing.length > 0 ? 'secondary' : 'primary'}
+                          icon={missing.length > 0 ? undefined : 'sparkles'}
                           loading={rowBusy}
                           disabled={!canGenerateFeatures || busy || pending.length === 0}
                           onClick={() => generateFor(row)}
                         >
-                          {pending.length === uncovered.length && row.prompts.length === 0
-                            ? 'Generate prompt for the whole epic'
-                            : `Generate prompt for ${plural(pending.length, 'story', 'stories')}`}
+                          {missing.length > 0
+                            ? 'Generate only this one'
+                            : pending.length === uncovered.length && row.prompts.length === 0
+                              ? 'Generate prompt for the whole epic'
+                              : `Generate prompt for ${plural(pending.length, 'story', 'stories')}`}
                         </Button>
                         {pending.length === 0 && <span className="step-row__hint">Tick at least one story.</span>}
                       </div>

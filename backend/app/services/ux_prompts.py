@@ -231,15 +231,26 @@ def suggest_mode(document: Document, has_blueprint: bool) -> str:
 # ── Feature relationships and ordering ───────────────────────────────────────
 
 def _sanitize_feature_map(features: list[dict[str, Any]], epic_ids: set[str]) -> list[dict[str, Any]]:
+    """depends_on comes back as [{epic, reason}]; older stored maps hold plain
+    ids. Either way the result is depends_on: [ids] plus depends_on_reasons."""
     cleaned = []
     for f in features:
         eid = f.get("epic_external_id")
         if eid not in epic_ids:
             continue
+        reasons: dict[str, str] = {}
+        for dep in f.get("depends_on", []):
+            dep_id, reason = (dep.get("epic"), dep.get("reason", "")) if isinstance(dep, dict) else (dep, "")
+            if dep_id in epic_ids and dep_id != eid and dep_id not in reasons:
+                reasons[dep_id] = (reason or "").strip()
+        for dep_id, reason in (f.get("depends_on_reasons") or {}).items():
+            if dep_id in reasons and not reasons[dep_id]:
+                reasons[dep_id] = reason
         cleaned.append(
             {
                 "epic_external_id": eid,
-                "depends_on": [d for d in dict.fromkeys(f.get("depends_on", [])) if d in epic_ids and d != eid],
+                "depends_on": list(reasons),
+                "depends_on_reasons": {k: v for k, v in reasons.items() if v},
                 "integrates": [
                     {"with_epic": i["with_epic"], "how": i["how"]}
                     for i in f.get("integrates", [])
@@ -248,6 +259,47 @@ def _sanitize_feature_map(features: list[dict[str, Any]], epic_ids: set[str]) ->
             }
         )
     return cleaned
+
+
+def _sanitize_story_dependencies(items: list[dict[str, Any]], story_ids: set[str]) -> list[dict[str, Any]]:
+    """Keeps pairs of real, different stories, once each."""
+    seen: set[tuple[str, str]] = set()
+    cleaned = []
+    for item in items:
+        pair = (item.get("story"), item.get("depends_on"))
+        if pair[0] not in story_ids or pair[1] not in story_ids or pair[0] == pair[1] or pair in seen:
+            continue
+        seen.add(pair)
+        cleaned.append(
+            {"story_external_id": pair[0], "depends_on": pair[1], "reason": (item.get("reason") or "").strip()}
+        )
+    return cleaned
+
+
+def dependency_map(document: Document) -> Optional[dict[str, Any]]:
+    """The dependency map stored on an approved version, if it has one."""
+    return (document.type_metadata or {}).get("dependency_map")
+
+
+def compute_dependency_map(session: Session, document: Document, llm_client) -> dict[str, Any]:
+    """Works out which epics and stories depend on which, for one approved
+    version, and stores it on that version's type_metadata. Runs at approval
+    (routers/requirements.py::approve) so the Design page can show the order
+    before any blueprint exists, and on demand for versions approved earlier."""
+    epics = _epics_with_stories(_ordered_items(session, document.id))
+    epic_ids = {e["external_id"] for e in epics}
+    story_ids = {s["external_id"] for e in epics for s in e["stories"]}
+    result: dict[str, Any] = {"feature_map": [], "story_dependencies": []}
+    if len(epic_ids) + len(story_ids) > 2:
+        data, usage = analyze_feature_relationships(epics, llm_client, model=UX_PROMPT_MODEL)
+        _log_call(session, document.project_id, document.id, UX_PROMPT_MODEL, usage)
+        result = {
+            "feature_map": _sanitize_feature_map(data.get("features") or [], epic_ids),
+            "story_dependencies": _sanitize_story_dependencies(data.get("story_dependencies") or [], story_ids),
+        }
+    document.type_metadata = {**(document.type_metadata or {}), "dependency_map": result}
+    session.flush()
+    return result
 
 
 def order_epics(epic_ids: list[str], feature_map: list[dict[str, Any]]) -> list[str]:
@@ -403,6 +455,8 @@ def list_sources(session: Session, project: Project) -> dict[str, Any]:
         "epics_missing_from_blueprint": [],
         "has_design_system": bool(brief.get("design_tokens_summary")),
         "feature_map": brief.get("feature_map") or [],
+        "story_dependencies": [],
+        "has_dependency_map": False,
         "suggested_order": [],
         "sitemap": _sitemap_with_status(session, project.id, brief),
         "registry": screen_registry(session, project.id),
@@ -411,6 +465,16 @@ def list_sources(session: Session, project: Project) -> dict[str, Any]:
     }
     if doc is None:
         return result
+
+    # The version's own map (worked out at approval) wins; a blueprint made
+    # before dependencies were stored per version still has one on the brief.
+    stored = dependency_map(doc)
+    if stored is not None:
+        result["feature_map"] = stored["feature_map"]
+        result["story_dependencies"] = stored["story_dependencies"]
+        result["has_dependency_map"] = True
+    else:
+        result["has_dependency_map"] = bool(result["feature_map"])
 
     items = _ordered_items(session, doc.id)
     stories_by_epic: dict[str, list[RequirementItem]] = {}
@@ -472,11 +536,9 @@ def _generate_blueprint(
         raise ValueError("The approved version has no epics to plan navigation slots for.")
     epic_ids = {e["external_id"] for e in epics}
 
-    feature_map: list[dict[str, Any]] = []
-    if len(epics) > 1:
-        relations, usage = analyze_feature_relationships(epics, llm_client, model=UX_PROMPT_MODEL)
-        _log_call(session, project.id, document.id, UX_PROMPT_MODEL, usage)
-        feature_map = _sanitize_feature_map(relations, epic_ids)
+    # Usually worked out already, at approval; otherwise now (and stored on the version).
+    stored = dependency_map(document) or compute_dependency_map(session, document, llm_client)
+    feature_map = _sanitize_feature_map(stored["feature_map"], epic_ids)
 
     order = order_epics([e["external_id"] for e in epics], feature_map)
     planned = sorted(epics, key=lambda e: order.index(e["external_id"]))

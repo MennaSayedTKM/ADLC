@@ -400,22 +400,35 @@ def generate_ux_prompt(
 
 # ── Feature relationships ────────────────────────────────────────────────────
 
+# Confirmed live: with "never guess / an empty list is a correct answer", a
+# startup-support platform's 11 epics came back with one dependency between
+# them, although assessments, needs, funding and case management all act on
+# the startups registered in another epic. Dependencies follow from what the
+# stories create and use, so they are inferred from that, each with a reason
+# the PM can check.
 _RELATIONSHIPS_SYSTEM_PROMPT = (
     "You are a senior product designer and business analyst mapping how the features of one "
-    "software platform relate, so they can be designed in a sensible order and linked "
-    "consistently. You are given every epic with its stories (and any dependencies the "
+    "software platform depend on each other, so they can be designed in a sensible order and "
+    "linked consistently. You are given every epic with its stories (and any dependencies the "
     "requirements document stated).\n\n"
+    "Work it out from what the stories create and use. A feature depends on another when it "
+    "reads, shows, updates or acts on records, users, configuration or screens that the other "
+    "one creates or manages: anything done to a startup, customer or order depends on the "
+    "epic where those records are created; approving depends on submitting; reports and "
+    "dashboards depend on the epics that produce their data; screens governed by roles depend "
+    "on the epic that sets up users and permissions. This is inference from the stories, which "
+    "is what is wanted — but only list dependencies you can explain in one clause.\n\n"
     "For each epic, report:\n"
-    "- depends_on: epic ids that must exist first because this epic uses their data, screens "
-    "or configuration (e.g. 'Reporting' depends on the epic that creates the records being "
-    "reported). Only real dependencies evidenced by the stories or the stated dependencies — "
-    "never guess, and never list an epic as depending on itself.\n"
-    "- integrates: other epics this one touches at the UI level without strictly depending on "
-    "them (shared entities, links, notifications, shared lists). Each entry names the other "
-    "epic and says in one short clause what is shared or linked (e.g. 'objective picker reuses "
-    "the strategy hierarchy list').\n\n"
-    "Use the epic ids exactly as given. Leave lists empty when there is no evidence — an "
-    "empty list is a correct answer. Return via the record_feature_relationships tool."
+    "- depends_on: the epics that must exist first, each with a one-clause reason naming what "
+    "is used (e.g. 'reviews the applications submitted in E6'). Direct dependencies only — if "
+    "A needs B and B needs C, A lists B, not C. Never an epic depending on itself.\n"
+    "- integrates: other epics it touches at the UI level without depending on them (shared "
+    "entities, links, notifications, shared lists), each with what is shared or linked.\n\n"
+    "Also report story_dependencies: pairs of stories (in the same epic or across epics) where "
+    "one story needs another story's result to exist first, each with a one-clause reason "
+    "(e.g. S14 'Approve funding application' needs S12 'Submit funding application'). Direct "
+    "dependencies only; skip pairs that are only loosely related.\n\n"
+    "Use the epic and story ids exactly as given. Return via the record_feature_relationships tool."
 )
 
 _RELATIONSHIPS_PARAMETERS = {
@@ -427,7 +440,15 @@ _RELATIONSHIPS_PARAMETERS = {
                 "type": "object",
                 "properties": {
                     "epic_external_id": {"type": "string"},
-                    "depends_on": {"type": "array", "items": {"type": "string"}},
+                    "depends_on": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"epic": {"type": "string"}, "reason": {"type": "string"}},
+                            "required": ["epic", "reason"],
+                            "additionalProperties": False,
+                        },
+                    },
                     "integrates": {
                         "type": "array",
                         "items": {
@@ -441,9 +462,22 @@ _RELATIONSHIPS_PARAMETERS = {
                 "required": ["epic_external_id", "depends_on", "integrates"],
                 "additionalProperties": False,
             },
-        }
+        },
+        "story_dependencies": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "story": {"type": "string"},
+                    "depends_on": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["story", "depends_on", "reason"],
+                "additionalProperties": False,
+            },
+        },
     },
-    "required": ["features"],
+    "required": ["features", "story_dependencies"],
     "additionalProperties": False,
 }
 
@@ -451,7 +485,7 @@ _RELATIONSHIPS_TOOL = {
     "type": "function",
     "function": {
         "name": "record_feature_relationships",
-        "description": "Record the dependencies and UI touchpoints between the epics.",
+        "description": "Record the dependencies and UI touchpoints between the epics, and between stories.",
         "parameters": _RELATIONSHIPS_PARAMETERS,
         "strict": True,
     },
@@ -460,8 +494,10 @@ _RELATIONSHIPS_TOOL = {
 
 def analyze_feature_relationships(
     epics: list[dict[str, Any]], client, model: str = UX_PROMPT_MODEL
-) -> tuple[list[dict[str, Any]], Usage]:
-    """Returns (features, usage), features = [{epic_external_id, depends_on, integrates}]."""
+) -> tuple[dict[str, Any], Usage]:
+    """Returns ({features, story_dependencies}, usage):
+    features = [{epic_external_id, depends_on: [{epic, reason}], integrates: [{with_epic, how}]}],
+    story_dependencies = [{story, depends_on, reason}] (story external ids)."""
     blocks = []
     for e in epics:
         lines = [f"{e['external_id']}: {e['title']}"]
@@ -486,7 +522,7 @@ def analyze_feature_relationships(
         )
 
     data, usage = _create_and_parse_tool_call(make_request, "record_feature_relationships")
-    return data["features"], usage
+    return data, usage
 
 
 # ── Vision drafting ──────────────────────────────────────────────────────────

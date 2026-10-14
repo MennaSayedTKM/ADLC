@@ -77,7 +77,14 @@ class IntegrationIO(BaseModel):
 class FeatureRelation(BaseModel):
     epic_external_id: str
     depends_on: list[str] = []
+    depends_on_reasons: dict[str, str] = {}  # epic external id -> why it is needed first
     integrates: list[IntegrationIO] = []
+
+
+class StoryDependency(BaseModel):
+    story_external_id: str
+    depends_on: str  # the story that has to exist first
+    reason: str = ""
 
 
 class SitemapItem(BaseModel):
@@ -100,6 +107,8 @@ class UxPromptSources(BaseModel):
     epics_missing_from_blueprint: list[str] = []
     has_design_system: bool = False  # a design tokens summary is saved for this project
     feature_map: list[FeatureRelation] = []
+    story_dependencies: list[StoryDependency] = []
+    has_dependency_map: bool = False  # false for a version approved before dependencies were stored
     suggested_order: list[str] = []  # epic external ids, dependencies first
     sitemap: list[SitemapItem] = []
     registry: list[RegistryScreen] = []

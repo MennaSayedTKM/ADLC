@@ -51,6 +51,19 @@ def get_sources(project_id: str, db: Session = Depends(get_db)):
     return svc.list_sources(db, project)
 
 
+@router.post("/dependencies", response_model=UxPromptSources)
+def work_out_dependencies(project_id: str, db: Session = Depends(get_db), llm_client=Depends(get_openai_client)):
+    """Works out (again) which epics and stories of the latest approved version
+    depend on which. Normally done at approval; this covers versions approved
+    before that, and a PM who wants it redone. Returns the updated sources."""
+    project = _get_project_or_404(db, project_id)
+    doc = svc.latest_approved_document(db, project.id)
+    if doc is None:
+        raise HTTPException(status_code=409, detail="Approve a requirements version first.")
+    svc.compute_dependency_map(db, doc, llm_client)
+    return svc.list_sources(db, project)
+
+
 @router.put("/style-brief", response_model=StyleBriefIO)
 def save_style_brief(project_id: str, body: StyleBriefIO, db: Session = Depends(get_db)):
     project = _get_project_or_404(db, project_id)
