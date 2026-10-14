@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { api } from '../api/client'
-import type { UxPrompt, UxPromptSources } from '../api/types'
+import type { EpicWithStories, RequirementItem, UxPrompt, UxPromptSources } from '../api/types'
 import { UxBlueprintPanel } from '../components/UxBlueprintPanel'
 import { UxFeaturePanel } from '../components/UxFeaturePanel'
 import { UxPromptCard } from '../components/UxPromptCard'
@@ -44,8 +44,14 @@ interface StepRow {
   title: string
   subtitle: string
   epicExternalId: string | null
-  prompt: UxPrompt | undefined
-  storyCount: number
+  /** Oldest first; an epic can have several prompts, each covering some of its stories. */
+  prompts: UxPrompt[]
+  stories: RequirementItem[]
+}
+
+/** Stories of an epic that some prompt already covers. */
+function coveredStoryIds(prompts: UxPrompt[]): Set<string> {
+  return new Set(prompts.flatMap((p) => p.story_ids))
 }
 
 export function DesignPage() {
@@ -81,6 +87,49 @@ export function DesignPage() {
   return <DesignPrompts />
 }
 
+/** Tick the stories a prompt should cover. Everything is ticked by default. */
+function StoryPicker({
+  stories,
+  excluded,
+  disabled,
+  onToggle,
+  onSetAll,
+}: {
+  stories: RequirementItem[]
+  excluded: Set<string>
+  disabled: boolean
+  onToggle: (storyId: string) => void
+  onSetAll: (stories: RequirementItem[], selected: boolean) => void
+}) {
+  const chosen = stories.filter((s) => !excluded.has(s.id)).length
+  return (
+    <fieldset className="story-picker" disabled={disabled}>
+      <legend className="story-picker__legend">
+        Stories to cover <span>· {chosen} of {stories.length}</span>
+      </legend>
+      <div className="story-picker__bulk">
+        <button type="button" className="link-button" onClick={() => onSetAll(stories, true)}>
+          Select all
+        </button>
+        <button type="button" className="link-button" onClick={() => onSetAll(stories, false)}>
+          Select none
+        </button>
+      </div>
+      <ul className="story-picker__list">
+        {stories.map((story) => (
+          <li key={story.id}>
+            <label className="story-picker__item">
+              <input type="checkbox" checked={!excluded.has(story.id)} onChange={() => onToggle(story.id)} />
+              <span className="story-picker__id">{story.external_id}</span>
+              <span>{story.text}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </fieldset>
+  )
+}
+
 function DesignPrompts() {
   const { project } = useProject()
   const { sources, prompts, error, loading, onBlueprint, onFeature, onChanged, onDeleted, refreshSources } = useUxPrompts(project.id)
@@ -89,7 +138,11 @@ function DesignPrompts() {
   const [styleOpen, setStyleOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [generating, setGenerating] = useState<string | null>(null)
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null)
   const [genError, setGenError] = useState<string | null>(null)
+  // Epics ticked for "generate several at once", and stories the person unticked.
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [excluded, setExcluded] = useState<Set<string>>(new Set())
 
   if (loading && !sources) return <p className="page-status">Loading…</p>
 
@@ -112,11 +165,11 @@ function DesignPrompts() {
 
   const doc = sources.document
   const blueprint = prompts.find((p) => p.mode === 'foundation')
-  const epicByExternalId = new Map(sources.epics.map((e) => [e.epic.external_id, e]))
-  const latestFor = (externalId: string) =>
+  const epicByExternalId = new Map<string, EpicWithStories>(sources.epics.map((e) => [e.epic.external_id, e]))
+  const promptsFor = (externalId: string) =>
     prompts
       .filter((p) => p.mode !== 'foundation' && p.epic_external_id === externalId)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
 
   const rows: StepRow[] = [
     {
@@ -124,8 +177,8 @@ function DesignPrompts() {
       title: 'Platform blueprint',
       subtitle: 'The look, navigation and layout shared by every screen. Paste this first.',
       epicExternalId: null,
-      prompt: blueprint,
-      storyCount: 0,
+      prompts: blueprint ? [blueprint] : [],
+      stories: [],
     },
     ...sources.suggested_order.flatMap((externalId): StepRow[] => {
       const entry = epicByExternalId.get(externalId)
@@ -139,32 +192,74 @@ function DesignPrompts() {
             .map((s) => s.text)
             .join(' · '),
           epicExternalId: externalId,
-          prompt: latestFor(externalId),
-          storyCount: entry.stories.length,
+          prompts: promptsFor(externalId),
+          stories: entry.stories,
         },
       ]
     }),
   ]
 
   const style = styleSummary(sources)
-  const generated = rows.filter((r) => r.prompt)
-  const pastedCount = generated.filter((r) => r.prompt && pasted.has(r.prompt.id)).length
   const canGenerateFeatures = sources.has_blueprint || sources.has_design_system
+  const busy = generating !== null || bulk !== null
+
+  // One progress unit per prompt, plus one for every row that has none yet.
+  const units = rows.flatMap((r) => (r.prompts.length > 0 ? r.prompts.map((p) => pasted.has(p.id)) : [false]))
+  const pastedCount = units.filter(Boolean).length
+
+  function toggleStory(storyId: string) {
+    setExcluded((prev) => {
+      const next = new Set(prev)
+      if (next.has(storyId)) next.delete(storyId)
+      else next.add(storyId)
+      return next
+    })
+  }
+
+  function setStories(stories: RequirementItem[], selected: boolean) {
+    setExcluded((prev) => {
+      const next = new Set(prev)
+      for (const s of stories) {
+        if (selected) next.delete(s.id)
+        else next.add(s.id)
+      }
+      return next
+    })
+  }
+
+  function togglePicked(key: string) {
+    setPicked((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  /** The stories a new prompt for this row would cover: ticked, and not covered by an earlier prompt. */
+  function pendingStories(row: StepRow): RequirementItem[] {
+    const covered = coveredStoryIds(row.prompts)
+    return row.stories.filter((s) => !covered.has(s.id) && !excluded.has(s.id))
+  }
+
+  async function generateOne(row: StepRow, stories: RequirementItem[]) {
+    const entry = row.epicExternalId ? epicByExternalId.get(row.epicExternalId) : undefined
+    if (!entry || stories.length === 0) return
+    const prompt = await api.generateUxPrompt(project.id, {
+      documentId: doc.id,
+      mode: 'new_feature',
+      styleBrief: {},
+      epicId: entry.epic.id,
+      storyIds: stories.map((s) => s.id),
+    })
+    onFeature(prompt)
+  }
 
   async function generateFor(row: StepRow) {
-    const entry = row.epicExternalId ? epicByExternalId.get(row.epicExternalId) : undefined
-    if (!entry) return
     setGenerating(row.key)
     setGenError(null)
     try {
-      const prompt = await api.generateUxPrompt(project.id, {
-        documentId: doc.id,
-        mode: 'new_feature',
-        styleBrief: {},
-        epicId: entry.epic.id,
-        storyIds: entry.stories.map((s) => s.id),
-      })
-      onFeature(prompt)
+      await generateOne(row, pendingStories(row))
       refreshSources()
     } catch (err) {
       setGenError(err instanceof Error ? err.message : 'Could not generate this prompt')
@@ -172,6 +267,32 @@ function DesignPrompts() {
       setGenerating(null)
     }
   }
+
+  // One request per epic, in the order shown: each prompt is generated knowing the screens the
+  // previous ones created. A failure doesn't stop the rest.
+  async function generateSelected() {
+    const chosen = rows.filter((r) => r.epicExternalId && picked.has(r.key) && pendingStories(r).length > 0)
+    if (chosen.length === 0) return
+    setBulk({ done: 0, total: chosen.length })
+    setGenError(null)
+    const failed: string[] = []
+    for (const row of chosen) {
+      try {
+        await generateOne(row, pendingStories(row))
+      } catch (err) {
+        failed.push(`${row.title}: ${err instanceof Error ? err.message : 'could not be generated'}`)
+      }
+      setBulk((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev))
+    }
+    setBulk(null)
+    setPicked(new Set())
+    refreshSources()
+    if (failed.length > 0) setGenError(failed.join(' · '))
+  }
+
+  const pickableRows = rows.filter((r) => r.epicExternalId)
+  const readyToPick = pickableRows.filter((r) => pendingStories(r).length > 0)
+  const selectedCount = readyToPick.filter((r) => picked.has(r.key)).length
 
   return (
     <div className="page">
@@ -181,6 +302,7 @@ function DesignPrompts() {
           <>
             We turned your approved stories into a set of prompts. Paste them into Figma Make <strong>in order</strong> —
             the first one sets the look and layout, the rest add one feature at a time and stay consistent with it.
+            Generate a prompt for a whole epic, or tick just the stories you want.
           </>
         }
         actions={
@@ -194,11 +316,11 @@ function DesignPrompts() {
         <div className="design-strip__progress">
           <p className="design-strip__label">Your progress</p>
           <p className="design-strip__value">
-            {pastedCount} of {rows.length} {pastedCount === 1 ? 'prompt' : 'prompts'} pasted
+            {pastedCount} of {units.length} {units.length === 1 ? 'prompt' : 'prompts'} pasted
           </p>
           <StepSegments
-            label={`${pastedCount} of ${rows.length} prompts pasted`}
-            states={rows.map((r) => (r.prompt && pasted.has(r.prompt.id) ? 'done' : 'upcoming'))}
+            label={`${pastedCount} of ${units.length} prompts pasted`}
+            states={units.map((done) => (done ? 'done' : 'upcoming'))}
           />
         </div>
         <div className="design-strip__style">
@@ -226,21 +348,61 @@ function DesignPrompts() {
 
       {genError && <Banner tone="danger">{genError}</Banner>}
 
+      <div className="bulk-bar" role="group" aria-label="Generate several prompts at once">
+        <label className="bulk-bar__all">
+          <input
+            type="checkbox"
+            checked={readyToPick.length > 0 && selectedCount === readyToPick.length}
+            disabled={!canGenerateFeatures || busy || readyToPick.length === 0}
+            onChange={(e) => setPicked(e.target.checked ? new Set(readyToPick.map((r) => r.key)) : new Set())}
+          />
+          Select every epic that still needs a prompt
+        </label>
+        <span className="bulk-bar__count">{selectedCount > 0 ? `${plural(selectedCount, 'epic')} selected` : 'Tick epics below to generate them together'}</span>
+        <Button
+          variant="primary"
+          icon="sparkles"
+          loading={bulk !== null}
+          disabled={selectedCount === 0 || busy || !canGenerateFeatures}
+          onClick={generateSelected}
+        >
+          {bulk ? `Generating ${Math.min(bulk.done + 1, bulk.total)} of ${bulk.total}…` : selectedCount > 1 ? `Generate ${selectedCount} prompts` : 'Generate prompt'}
+        </Button>
+      </div>
+      {!canGenerateFeatures && (
+        <p className="bulk-note">Set up the platform blueprint first — every feature is built to fit it.</p>
+      )}
+
       <ol className="step-list">
         {rows.map((row, index) => {
           const open = openKey === row.key
-          const isPasted = row.prompt ? pasted.has(row.prompt.id) : false
+          const isEpic = row.epicExternalId !== null
+          const allPasted = row.prompts.length > 0 && row.prompts.every((p) => pasted.has(p.id))
+          const covered = coveredStoryIds(row.prompts)
+          const uncovered = row.stories.filter((s) => !covered.has(s.id))
+          const pending = pendingStories(row)
+          const rowBusy = generating === row.key
           return (
             <li key={row.key} className={`step-row ${open ? 'step-row--open' : ''}`}>
               <div className="step-row__head">
+                {isEpic && (
+                  <input
+                    type="checkbox"
+                    className="step-row__pick"
+                    checked={picked.has(row.key) && uncovered.length > 0}
+                    disabled={!canGenerateFeatures || busy || uncovered.length === 0}
+                    onChange={() => togglePicked(row.key)}
+                    aria-label={uncovered.length === 0 ? `${row.title} is fully covered` : `Include ${row.title} in the batch`}
+                  />
+                )}
                 <button
                   type="button"
                   className="step-row__toggle"
                   aria-expanded={open}
                   onClick={() => setOpenKey(open ? null : row.key)}
                 >
-                  <span className={`step-row__number ${isPasted ? 'step-row__number--done' : ''}`} aria-hidden="true">
-                    {isPasted ? <Icon name="check" size={16} strokeWidth={2.5} /> : index + 1}
+                  <span className={`step-row__number ${allPasted ? 'step-row__number--done' : ''}`} aria-hidden="true">
+                    {allPasted ? <Icon name="check" size={16} strokeWidth={2.5} /> : index + 1}
                   </span>
                   <span className="step-row__text">
                     <span className="step-row__title">{row.title}</span>
@@ -249,12 +411,20 @@ function DesignPrompts() {
                 </button>
 
                 <div className="step-row__chips">
-                  {index === 0 && !isPasted && <Badge tone="accent">Start here</Badge>}
-                  {row.storyCount > 0 && <Badge>{plural(row.storyCount, 'story', 'stories')}</Badge>}
-                  {row.prompt?.is_stale && <Badge tone="warning" icon="alert">Outdated</Badge>}
-                  {!row.prompt ? (
+                  {index === 0 && !allPasted && <Badge tone="accent">Start here</Badge>}
+                  {isEpic && (
+                    <Badge tone={row.prompts.length > 0 && uncovered.length === 0 ? 'success' : 'neutral'}>
+                      {row.prompts.length === 0
+                        ? plural(row.stories.length, 'story', 'stories')
+                        : uncovered.length === 0
+                          ? `All ${row.stories.length} stories covered`
+                          : `${row.stories.length - uncovered.length} of ${row.stories.length} stories covered`}
+                    </Badge>
+                  )}
+                  {row.prompts.some((p) => p.is_stale) && <Badge tone="warning" icon="alert">Outdated</Badge>}
+                  {row.prompts.length === 0 ? (
                     <Badge>Not generated</Badge>
-                  ) : isPasted ? (
+                  ) : allPasted ? (
                     <Badge tone="success" icon="check">Pasted</Badge>
                   ) : (
                     <Badge>Not pasted yet</Badge>
@@ -265,40 +435,53 @@ function DesignPrompts() {
 
               {open && (
                 <div className="step-row__body">
-                  {row.prompt ? (
-                    <>
+                  {row.prompts.map((prompt, n) => (
+                    <div key={prompt.id} className="step-row__prompt">
+                      {row.prompts.length > 1 && <p className="step-row__prompt-title">Prompt {n + 1} of {row.prompts.length}</p>}
                       <UxPromptCard
-                        key={`${row.prompt.id}-${row.prompt.updated_at}`}
+                        key={`${prompt.id}-${prompt.updated_at}`}
                         projectId={project.id}
-                        prompt={row.prompt}
+                        prompt={prompt}
                         embedded
                         onChanged={onChanged}
                         onDeleted={onDeleted}
-                        onCopied={() => row.prompt && markPasted(row.prompt.id)}
+                        onCopied={() => markPasted(prompt.id)}
                       />
                       <label className="step-row__pasted">
-                        <input type="checkbox" checked={isPasted} onChange={() => row.prompt && toggle(row.prompt.id)} />
+                        <input type="checkbox" checked={pasted.has(prompt.id)} onChange={() => toggle(prompt.id)} />
                         I’ve pasted this into Figma Make
                       </label>
-                    </>
-                  ) : row.epicExternalId ? (
-                    <div className="step-row__empty">
-                      <p>
-                        {canGenerateFeatures
-                          ? 'This feature has no prompt yet. Generate one that fits into the platform blueprint.'
-                          : 'Set up the platform blueprint first — every feature is built to fit it.'}
-                      </p>
-                      <Button
-                        variant="primary"
-                        icon="sparkles"
-                        loading={generating === row.key}
-                        disabled={!canGenerateFeatures || generating !== null}
-                        onClick={() => generateFor(row)}
-                      >
-                        Generate this prompt
-                      </Button>
                     </div>
-                  ) : (
+                  ))}
+
+                  {isEpic && uncovered.length > 0 && (
+                    <div className="step-row__generate">
+                      <p>
+                        {row.prompts.length === 0
+                          ? canGenerateFeatures
+                            ? 'No prompt yet. Choose which stories it should cover — all of them make one prompt for the whole epic.'
+                            : 'Set up the platform blueprint first — every feature is built to fit it.'
+                          : `${plural(uncovered.length, 'story', 'stories')} not covered by an earlier prompt. Generate another prompt for them.`}
+                      </p>
+                      <StoryPicker stories={uncovered} excluded={excluded} disabled={rowBusy} onToggle={toggleStory} onSetAll={setStories} />
+                      <div className="step-row__generate-actions">
+                        <Button
+                          variant="primary"
+                          icon="sparkles"
+                          loading={rowBusy}
+                          disabled={!canGenerateFeatures || busy || pending.length === 0}
+                          onClick={() => generateFor(row)}
+                        >
+                          {pending.length === uncovered.length && row.prompts.length === 0
+                            ? 'Generate prompt for the whole epic'
+                            : `Generate prompt for ${plural(pending.length, 'story', 'stories')}`}
+                        </Button>
+                        {pending.length === 0 && <span className="step-row__hint">Tick at least one story.</span>}
+                      </div>
+                    </div>
+                  )}
+
+                  {!isEpic && row.prompts.length === 0 && (
                     <div className="step-row__empty">
                       <p>The blueprint isn’t generated yet. Set the style above, then generate it.</p>
                       <Button variant="primary" icon="sparkles" onClick={() => setStyleOpen(true)}>
@@ -315,7 +498,7 @@ function DesignPrompts() {
 
       <Panel
         title="More ways to generate"
-        description="Create several prompts at once, change the order, or design an edit to screens that already exist."
+        description="Change the order of epics, or design an edit to screens that already exist."
         tone="sunken"
         actions={
           <Button variant="secondary" size="sm" onClick={() => setMoreOpen((v) => !v)} aria-expanded={moreOpen}>
