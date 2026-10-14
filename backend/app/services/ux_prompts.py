@@ -57,6 +57,7 @@ _USER_TEXT_FIELDS = (
 _CONTEXT_MAX_NAV = 24
 _CONTEXT_MAX_SCREENS = 40
 _CONTEXT_MAX_VISION_CHARS = 400
+_CONTEXT_MAX_STORY_DEPS = 12
 
 
 class BlueprintExistsError(ValueError):
@@ -383,22 +384,41 @@ def _sitemap_with_status(session: Session, project_id: str, brief: dict[str, Any
     ]
 
 
+def _designed_story_ids(session: Session, project_id: str, exclude_prompt_id: Optional[str]) -> set[str]:
+    """External ids (S4, S5...) of every story some existing prompt covers. By
+    external id because a newer requirements version copies stories under new
+    item ids, while the prompts keep the ids of the version they were made from."""
+    item_ids = {sid for p, _ in _prompt_rows(session, project_id, exclude_prompt_id) for sid in p.story_ids or []}
+    if not item_ids:
+        return set()
+    rows = session.query(RequirementItem.external_id).filter(RequirementItem.id.in_(item_ids)).all()
+    return {r[0] for r in rows}
+
+
 def build_context_pack(
     session: Session,
     project: Project,
     epic_external_id: str,
     epic_titles: dict[str, str],
     exclude_prompt_id: Optional[str] = None,
+    document: Optional[Document] = None,
+    story_external_ids: Optional[list[str]] = None,
 ) -> str:
     """
     The platform context Figma Make is given with every feature/edit prompt so
     the new piece matches what already exists. Deliberately compact: it is
     re-sent with every prompt, and Figma credits scale with prompt size.
+
+    Dependencies come from the map stored on `document` (worked out when that
+    version was approved) — the same one the Design page shows — falling back
+    to the map a blueprint made before dependencies were stored per version.
     """
     brief = get_style_brief(project)
     sitemap = _sitemap_with_status(session, project.id, brief)
     registry = screen_registry(session, project.id, exclude_prompt_id)
-    relation = next((f for f in brief.get("feature_map") or [] if f["epic_external_id"] == epic_external_id), None)
+    stored = dependency_map(document) if document is not None else None
+    feature_map = stored["feature_map"] if stored is not None else brief.get("feature_map") or []
+    relation = next((f for f in feature_map if f["epic_external_id"] == epic_external_id), None)
     lines: list[str] = []
 
     if brief.get("vision"):
@@ -425,13 +445,39 @@ def build_context_pack(
         return "; ".join(names) if names else "not designed yet"
 
     if relation and relation["depends_on"]:
+        reasons = relation.get("depends_on_reasons") or {}
         lines.append("Depends on (build on / link to these):")
         for d in relation["depends_on"]:
-            lines.append(f"- {d} {epic_titles.get(d, '')}: screens {screens_of(d)}")
+            why = f" ({reasons[d]})" if reasons.get(d) else ""
+            lines.append(f"- {d} {epic_titles.get(d, '')}{why}: screens {screens_of(d)}")
     if relation and relation["integrates"]:
         lines.append("Integrates with:")
         for i in relation["integrates"]:
             lines.append(f"- {i['with_epic']} {epic_titles.get(i['with_epic'], '')}: {i['how']} (screens: {screens_of(i['with_epic'])})")
+
+    # Stories in this prompt that build on another story: say where that one stands, so the
+    # prompt links to existing screens, designs both together, or leaves a clear entry point.
+    in_prompt = set(story_external_ids or [])
+    story_deps = [d for d in (stored or {}).get("story_dependencies", []) if d["story_external_id"] in in_prompt]
+    if story_deps and document is not None:
+        items = _ordered_items(session, document.id)
+        stories = {i.external_id: i for i in items if i.type == "story"}
+        epic_of = {i.id: i.external_id for i in items if i.type == "epic"}
+        designed = _designed_story_ids(session, project.id, exclude_prompt_id)
+        lines.append("Story dependencies (a story builds on another one):")
+        for d in story_deps[:_CONTEXT_MAX_STORY_DEPS]:
+            target = stories.get(d["depends_on"])
+            if target is None:
+                continue
+            if d["depends_on"] in in_prompt:
+                where = "in this prompt - design them together"
+            elif d["depends_on"] in designed:
+                owner = epic_of.get(target.parent_id, "")
+                where = f"already designed - link to it (screens: {screens_of(owner)})"
+            else:
+                where = "not designed yet - leave a clear entry point for it, don't design it here"
+            why = f" ({d['reason']})" if d.get("reason") else ""
+            lines.append(f"- {d['story_external_id']} needs {d['depends_on']} {target.text}{why}: {where}")
     return "\n".join(lines)
 
 
@@ -639,7 +685,10 @@ def _generate_feature(
     exclude_prompt_id: Optional[str] = None,
 ) -> dict[str, Any]:
     titles = {i.external_id: i.text for i in _ordered_items(session, document.id) if i.type == "epic"}
-    context = build_context_pack(session, project, epic.external_id, titles, exclude_prompt_id)
+    context = build_context_pack(
+        session, project, epic.external_id, titles, exclude_prompt_id,
+        document=document, story_external_ids=[s.external_id for s in stories],
+    )
     data, usage = generate_ux_prompt(
         mode,
         brief,

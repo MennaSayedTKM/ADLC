@@ -664,3 +664,47 @@ def test_the_relationship_prompt_asks_for_reasons_and_story_dependencies(client,
     params = _RELATIONSHIPS_TOOL["function"]["parameters"]
     assert params["required"] == ["features", "story_dependencies"]
     assert "reason" in params["properties"]["features"]["items"]["properties"]["depends_on"]["items"]["properties"]
+
+
+# ── Dependencies in the prompts themselves ───────────────────────────────────
+# The context pack used to read the map saved with the blueprint, so dependencies
+# worked out later (at approval, or on request) reached the page but not the
+# prompts; reasons and story-level dependencies never reached them at all.
+
+def test_feature_prompt_uses_the_versions_dependencies_with_reasons(client, project_id, llm):
+    ids = _seed(project_id)
+    assert _blueprint(client, project_id, ids).status_code == 201  # its map has no dependencies
+    _relations_with_reasons(llm)
+    client.post(f"/projects/{project_id}/ux-prompts/dependencies")  # worked out after the blueprint
+
+    _feature(client, project_id, ids, epic="e1", story_keys=("s1", "s2"))
+    _feature(client, project_id, ids, epic="e2", story_keys=("s3",))
+
+    sent = llm.prompt_requests()[-1]
+    assert "E1 Strategy hierarchy (reports on the hierarchy created in E1): screens E1 List (/e1/list)" in sent
+
+
+def test_feature_prompt_says_where_each_needed_story_stands(client, project_id, llm):
+    _relations_with_reasons(llm)  # S2 needs S1, S3 needs S1
+    ids = _seed(project_id, approved=False)
+    client.post(f"/projects/{project_id}/requirements/{ids['doc']}/approve")
+    _blueprint(client, project_id, ids)
+
+    _feature(client, project_id, ids, epic="e1", story_keys=("s2",))
+    assert "- S2 needs S1 Create hierarchy (edits the hierarchy S1 creates): not designed yet" in llm.prompt_requests()[-1]
+
+    _feature(client, project_id, ids, epic="e1", story_keys=("s1", "s2"))
+    assert "- S2 needs S1 Create hierarchy (edits the hierarchy S1 creates): in this prompt" in llm.prompt_requests()[-1]
+
+    _feature(client, project_id, ids, epic="e2", story_keys=("s3",))
+    assert (
+        "- S3 needs S1 Create hierarchy (the report lists hierarchy items): already designed - link to it "
+        "(screens: E1 List (/e1/list))"
+    ) in llm.prompt_requests()[-1]
+
+
+def test_feature_prompt_without_story_dependencies_has_no_story_section(client, project_id, llm):
+    ids = _seed(project_id)
+    _blueprint(client, project_id, ids)
+    _feature(client, project_id, ids, epic="e1", story_keys=("s1",))
+    assert "Story dependencies" not in llm.prompt_requests()[-1]
