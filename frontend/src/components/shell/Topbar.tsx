@@ -130,7 +130,14 @@ export function Topbar({ route }: { route: Route }) {
 
       <div className="topbar__actions" ref={setActionsNode} />
 
-      <button type="button" className="search-trigger" onClick={() => setPaletteOpen(true)}>
+      <button
+        type="button"
+        className="search-trigger"
+        // the visible label is hidden on narrow screens, so name the button itself
+        aria-label={project ? 'Search project' : 'Search'}
+        title={project ? 'Search project' : 'Search'}
+        onClick={() => setPaletteOpen(true)}
+      >
         <Icon name="search" size={17} />
         <span className="search-trigger__label">{project ? 'Search project' : 'Search'}</span>
         <kbd className="search-trigger__kbd">{SEARCH_SHORTCUT}</kbd>

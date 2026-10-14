@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { api } from '../api/client'
 import type { PolicyDraft, StandingPolicy } from '../api/types'
 import { Banner } from '../components/ui/Banner'
@@ -73,6 +73,7 @@ export function StandingPoliciesPage() {
 type Mode = 'manual' | 'ai'
 
 function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => void }) {
+  const fieldId = useId()
   const [mode, setMode] = useState<Mode>('manual')
   const [title, setTitle] = useState('')
   const [policyText, setPolicyText] = useState('')
@@ -156,6 +157,7 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
         <form onSubmit={handleSubmit}>
           <input
             className="policy-form__title-input"
+            aria-label="Standard title"
             placeholder="Title (e.g. Accessibility default)"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -163,6 +165,7 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
           />
           <textarea
             className="policy-form__text-input"
+            aria-label="What the standard says"
             placeholder="What applies by default when the client’s own material is silent on this topic"
             value={policyText}
             onChange={(e) => setPolicyText(e.target.value)}
@@ -181,6 +184,7 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
           <textarea
             className="policy-form__text-input"
             autoFocus
+            aria-label="Area the standard should cover"
             placeholder="Describe the area — the AI will draft a title and a concrete default (e.g. 'session timeout for inactivity')"
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
@@ -203,15 +207,17 @@ function NewPolicyForm({ onCreated }: { onCreated: (policy: StandingPolicy) => v
       {mode === 'ai' && draft && (
         <div className="policy-form__draft-preview">
           <div className="policy-form__draft-badge">AI-drafted — review before adding</div>
-          <label className="policy-form__field-label">Title</label>
+          <label className="policy-form__field-label" htmlFor={`${fieldId}-title`}>Title</label>
           <input
+            id={`${fieldId}-title`}
             className="policy-form__title-input"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             disabled={busy}
           />
-          <label className="policy-form__field-label">Text</label>
+          <label className="policy-form__field-label" htmlFor={`${fieldId}-text`}>Text</label>
           <textarea
+            id={`${fieldId}-text`}
             className="policy-form__text-input"
             value={policyText}
             onChange={(e) => setPolicyText(e.target.value)}
