@@ -133,6 +133,7 @@ class JiraEpicPreview(BaseModel):
 
 class JiraPreviewOut(BaseModel):
     settings: Optional[JiraSettingsOut] = None
+    default_project_key: Optional[str] = None  # the company-wide default (Settings), if one is set
     design: JiraDesignScreens
     epics: list[JiraEpicPreview]
     unplanned_epics: int

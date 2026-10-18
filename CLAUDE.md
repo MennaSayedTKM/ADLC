@@ -44,6 +44,8 @@ build brief (historical — some details changed during the build).
   `alignment_reports.related_story_ids`. Keys are stored, so sending again updates; it never deletes
   in Jira, and labels are only added/removed one by one. One epic per request; a refused issue stops
   that epic but keeps what was already sent (never let an exception roll those keys back).
+  A company-wide default Jira project key lives in `app_settings` (Settings page); a project with no
+  Jira project of its own connects to it automatically on first load (`state/useJiraPreview.ts`).
 - `backend/app/services/style_reference.py` — reads a reference website's HTML/CSS (BeautifulSoup)
   into style tags. It fetches a user-supplied URL, so SSRF guards are mandatory (public IPs only,
   80/443 only, per-redirect checks, size/time caps) — keep them and their tests if you touch it.

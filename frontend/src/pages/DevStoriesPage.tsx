@@ -150,6 +150,7 @@ function DevStories() {
         key={`jira-${jira.preview?.settings?.project_key ?? 'none'}`}
         projectId={project.id}
         preview={jira.preview}
+        connectError={jira.connectError}
         onConnected={jira.setPreview}
       />
 

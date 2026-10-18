@@ -370,3 +370,29 @@ def test_markdown_becomes_jira_document_format():
             no_empty_text(child)
 
     no_empty_text(doc)
+
+
+# ── Company-wide default Jira project ────────────────────────────────────────
+
+def test_the_company_default_key_is_saved_and_shown_in_every_preview(client, project_id, jira):
+    _seed(project_id)
+    assert client.get("/settings/jira").json() == {"default_project_key": None}
+    assert _preview(client, project_id)["default_project_key"] is None
+
+    saved = client.put("/settings/jira", json={"default_project_key": " tk "})
+
+    assert saved.status_code == 200 and saved.json() == {"default_project_key": "TK"}
+    assert client.get("/settings/jira").json() == {"default_project_key": "TK"}
+    assert _preview(client, project_id)["default_project_key"] == "TK"
+    # a project still connects to the default the same way as to any key
+    assert _connect(client, project_id, "TK").json()["settings"]["project_key"] == "TK"
+
+
+def test_the_default_key_is_checked_and_can_be_cleared(client, project_id):
+    bad = client.put("/settings/jira", json={"default_project_key": "1-bad"})
+    assert bad.status_code == 422 and "project key" in bad.json()["detail"]
+    assert client.put("/settings/jira", json={"default_project_key": "AB"}).json()["default_project_key"] == "AB"
+
+    cleared = client.put("/settings/jira", json={"default_project_key": ""})
+
+    assert cleared.status_code == 200 and cleared.json() == {"default_project_key": None}

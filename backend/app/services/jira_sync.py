@@ -26,6 +26,7 @@ from ai.ingest.ingest import tiles_for_document
 from config import JIRA_DESCRIPTION_FALLBACK_CHARS
 
 from ..db.models import AlignmentFinding, AlignmentReport, DevStory, DevTask, Document, JiraEpic, Project, RequirementItem
+from .app_settings import get_jira_default_project_key
 from .dev_stories import overview
 from .jira_adf import markdown_to_adf
 from .jira_client import JiraClient, JiraError
@@ -240,6 +241,7 @@ def preview(session: Session, project: Project) -> dict[str, Any]:
         )
     return {
         "settings": settings_out(project),
+        "default_project_key": get_jira_default_project_key(session),
         "design": design,
         "epics": epics,
         "unplanned_epics": sum(1 for e in data["epics"] if not e["dev_stories"]),

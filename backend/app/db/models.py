@@ -541,3 +541,14 @@ class EvaluationReport(Base):
         CheckConstraint("stories_score between 0 and 100", name="ck_evaluation_reports_stories_score"),
         CheckConstraint("advisory_content_score between 0 and 100", name="ck_evaluation_reports_advisory_score"),
     )
+
+
+class AppSetting(Base):
+    """A company-wide setting (not per project), kept as key -> JSON value; see
+    services/app_settings.py for the keys. Set by a PM on the Settings page."""
+
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(JSON, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)

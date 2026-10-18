@@ -394,6 +394,12 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ project_key: projectKey }),
     }),
+  getJiraDefault: () => request<{ default_project_key: string | null }>('/settings/jira'),
+  saveJiraDefault: (defaultProjectKey: string) =>
+    request<{ default_project_key: string | null }>('/settings/jira', {
+      method: 'PUT',
+      body: JSON.stringify({ default_project_key: defaultProjectKey }),
+    }),
   sendEpicToJira: (projectId: string, epicExternalId: string) =>
     request<JiraSendResult>(`/projects/${projectId}/dev-stories/jira/epics/${epicExternalId}/send`, { method: 'POST' }),
 }

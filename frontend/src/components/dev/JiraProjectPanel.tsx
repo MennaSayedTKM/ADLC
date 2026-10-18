@@ -11,13 +11,16 @@ import { Panel } from '../ui/Panel'
 interface Props {
   projectId: string
   preview: JiraPreviewData | null
+  /** Why connecting to the company default failed, if it did. */
+  connectError?: string | null
   onConnected: (preview: JiraPreviewData) => void
 }
 
 /** Which Jira project this project's development stories go to. Connecting only reads the project. */
-export function JiraProjectPanel({ projectId, preview, onConnected }: Props) {
+export function JiraProjectPanel({ projectId, preview, connectError, onConnected }: Props) {
   const inputId = useId()
   const settings = preview?.settings ?? null
+  const defaultKey = preview?.default_project_key ?? null
   const [editing, setEditing] = useState(false)
   const [key, setKey] = useState(settings?.project_key ?? '')
   const [busy, setBusy] = useState(false)
@@ -54,6 +57,7 @@ export function JiraProjectPanel({ projectId, preview, onConnected }: Props) {
           <p className="jira-project__line">
             <Badge tone="success" icon="check">Connected</Badge>{' '}
             <strong>{settings.project_key}</strong> · {settings.project_name}
+            {settings.project_key === defaultKey && <> · <span className="jira-project__meta">company default</span></>}
             {settings.site_url && (
               <>
                 {' '}on{' '}
@@ -105,10 +109,14 @@ export function JiraProjectPanel({ projectId, preview, onConnected }: Props) {
           <p className="jira-project__meta">
             The key is the prefix of the project’s issue numbers (TK in TK-146). Connecting checks the project on the
             company’s Atlassian site with the same account as Confluence; it doesn’t change anything in Jira.
+            {defaultKey
+              ? ` New projects connect to the company default, ${defaultKey}, automatically.`
+              : ' A PM can set a company default key on the Settings page.'}
           </p>
         </form>
       )}
       {error && <Banner tone="danger">{error}</Banner>}
+      {!settings && connectError && !error && <Banner tone="warning">{connectError}</Banner>}
     </Panel>
   )
 }

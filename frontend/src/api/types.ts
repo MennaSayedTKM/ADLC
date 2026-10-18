@@ -494,6 +494,7 @@ export interface JiraEpicPreview {
 
 export interface JiraPreviewData {
   settings: JiraSettings | null
+  default_project_key: string | null // company-wide default (Settings); projects connect to it automatically
   design: { design_document_id: string | null; filename: string | null; screens: number; unlinked_screens: number }
   epics: JiraEpicPreview[] // planned epics only, in dependency order
   unplanned_epics: number
