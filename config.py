@@ -91,6 +91,21 @@ JAVA_COMMAND = str(_require("java_command"))
 PLANTUML_RENDER_TIMEOUT_SECONDS = int(_require("plantuml_render_timeout_seconds"))
 PLANTUML_DPI = int(_require("plantuml_dpi"))
 
+# Development stories and coding prompts
+DEV_STORY_MODEL = str(_require("dev_story_model"))
+DEV_STORY_MAX_TOKENS = int(_require("dev_story_max_tokens"))
+TECH_PROFILE_MODEL = str(_require("tech_profile_model"))
+TECH_PROFILE_MAX_TOKENS = int(_require("tech_profile_max_tokens"))
+TECH_PROFILE_MAX_DOCUMENT_CHARS = int(_require("tech_profile_max_document_chars"))
+CODING_PROMPT_MODEL = str(_require("coding_prompt_model"))
+CODING_PROMPT_REGION = str(_require("coding_prompt_region"))
+CODING_PROMPT_ROLE_ARN = str(_require("coding_prompt_role_arn") or "").strip()
+CODING_PROMPT_EFFORT = str(_require("coding_prompt_effort"))
+CODING_PROMPT_MAX_TOKENS = int(_require("coding_prompt_max_tokens"))
+CODING_PROMPT_TECH_DOCUMENT_CHARS = int(_require("coding_prompt_tech_document_chars"))
+CODING_PROMPT_INPUT_COST_PER_MILLION = float(_require("coding_prompt_input_cost_per_million"))
+CODING_PROMPT_OUTPUT_COST_PER_MILLION = float(_require("coding_prompt_output_cost_per_million"))
+
 # GPT-4o cost estimation
 GPT4O_INPUT_COST_PER_MILLION = float(_require("gpt4o_input_cost_per_million"))
 GPT4O_OUTPUT_COST_PER_MILLION = float(_require("gpt4o_output_cost_per_million"))

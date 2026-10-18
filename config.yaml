@@ -119,6 +119,38 @@ java_command: java
 plantuml_render_timeout_seconds: 120
 plantuml_dpi: 150
 
+# ── Development stories (Dev stories page, Jira) ────────────────────────────
+# Approved user stories are broken into development stories (Jira Stories) and
+# technical tasks (Jira Sub-tasks) by dev_story_model; each task's coding prompt
+# is written by coding_prompt_model, Claude on Amazon Bedrock through the EU
+# inference profile (eu.: requests stay in EU regions; Frankfurt has no
+# in-region-only route). Effort is Claude's thinking depth: low|medium|high|xhigh|max.
+dev_story_model: gpt-4o
+dev_story_max_tokens: 16000
+tech_profile_model: gpt-4o          # reads an uploaded tech-stack document into the per-area fields
+tech_profile_max_tokens: 3000
+tech_profile_max_document_chars: 60000
+coding_prompt_model: eu.anthropic.claude-opus-5-5
+coding_prompt_region: eu-central-1
+# An IAM role in another of the company's AWS accounts that the app assumes for
+# each coding prompt, so Claude runs (and is billed) there. Empty: Bedrock is
+# called with the app's own credentials. Set because Bedrock has an account-level
+# restriction on Claude for ADLC-Prod (support case pending, 2026-10-18); the
+# TKMind account's role allows Claude inference in EU regions only. Once AWS
+# lifts the restriction, empty this (and the Pulumi codingPromptRoleArn).
+coding_prompt_role_arn: arn:aws:iam::149536463498:role/adlc-coding-prompts
+coding_prompt_effort: high
+coding_prompt_max_tokens: 32000
+# How much of an uploaded tech-stack document goes into every coding prompt
+# (the per-area fields always go in full); bounds input cost on big projects.
+coding_prompt_tech_document_chars: 12000
+# USD per 1,000,000 tokens for coding_prompt_model on Bedrock, regional (EU)
+# on-demand rates from the AWS Price List API, 2026-10-14: "Claude Opus 5.5
+# (Amazon Bedrock Edition)", eu-central-1, input_tokens_standard / output_tokens_standard.
+# (Claude Opus 4.8 would be 5.50 / 27.50 from its Marketplace offer.)
+coding_prompt_input_cost_per_million: 4.40
+coding_prompt_output_cost_per_million: 22.00
+
 # ── GPT-4o cost estimation (for ai_calls logging) ────────────────────────────
 # USD per 1,000,000 tokens. Update when OpenAI changes pricing.
 gpt4o_input_cost_per_million: 2.50

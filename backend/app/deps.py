@@ -10,6 +10,8 @@ config change, not a re-setup.
 
 import os
 import sys
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -71,6 +73,67 @@ def get_optional_openai_client():
         return get_openai_client()
     except HTTPException:
         return None
+
+
+_role_credentials: dict | None = None
+_role_credentials_lock = threading.Lock()
+
+
+def _coding_role_credentials(role_arn: str, region: str) -> dict:
+    """Short-lived credentials for coding_prompt_role_arn, reused until five
+    minutes before they expire (an assumed role lasts an hour)."""
+    global _role_credentials
+    with _role_credentials_lock:
+        cached = _role_credentials
+        if (
+            cached is None
+            or cached["role_arn"] != role_arn
+            or cached["expires"] - datetime.now(timezone.utc) < timedelta(minutes=5)
+        ):
+            import boto3
+
+            sts = boto3.client("sts", region_name=region)
+            issued = sts.assume_role(RoleArn=role_arn, RoleSessionName="adlc-coding-prompt")["Credentials"]
+            cached = {
+                "role_arn": role_arn,
+                "access_key": issued["AccessKeyId"],
+                "secret_key": issued["SecretAccessKey"],
+                "session_token": issued["SessionToken"],
+                "expires": issued["Expiration"],
+            }
+            _role_credentials = cached
+        return cached
+
+
+def get_coding_llm_client():
+    """Claude on Amazon Bedrock (EU region) for coding prompts — the Anthropic
+    SDK's Bedrock client on the standard bedrock-runtime endpoint (InvokeModel).
+    Not the newer Messages-API endpoint (AnthropicBedrockMantle): that one
+    answered "model does not exist" for every Claude model, even in an account
+    where the console playground runs them (2026-10-18). It uses the AWS
+    credentials the app already has (the ECS task role in production,
+    AWS_PROFILE locally), or, when coding_prompt_role_arn is set, that role in
+    the other AWS account."""
+    from anthropic import AnthropicBedrock
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    from config import CODING_PROMPT_REGION, CODING_PROMPT_ROLE_ARN
+
+    if not CODING_PROMPT_ROLE_ARN:
+        return AnthropicBedrock(aws_region=CODING_PROMPT_REGION)
+    try:
+        creds = _coding_role_credentials(CODING_PROMPT_ROLE_ARN, CODING_PROMPT_REGION)
+    except (BotoCoreError, ClientError) as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"The coding model could not be reached: the Bedrock role in the other AWS account couldn't be used ({e}).",
+        )
+    return AnthropicBedrock(
+        aws_region=CODING_PROMPT_REGION,
+        aws_access_key=creds["access_key"],
+        aws_secret_key=creds["secret_key"],
+        aws_session_token=creds["session_token"],
+    )
 
 
 def get_anthropic_client():

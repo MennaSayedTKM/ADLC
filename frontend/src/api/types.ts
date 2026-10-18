@@ -404,3 +404,63 @@ export interface UxPrompt {
   created_at: string
   updated_at: string
 }
+
+// ── Development stories (Dev stories page) ──────────────────────────────────
+
+export type TaskArea = 'frontend' | 'backend' | 'data' | 'integration' | 'infrastructure' | 'testing'
+
+export interface TechProfile {
+  areas: Record<string, string> // area key -> the company's stack ("" = not specified)
+  document_name: string | null
+  document_chars: number
+}
+
+export interface TechDocumentRead extends TechProfile {
+  read_from_document: Record<string, string>
+}
+
+export interface DevTask {
+  id: string
+  position: number
+  title: string
+  summary: string
+  area: TaskArea
+  coding_prompt: string | null
+  edited_prompt: string | null
+  tech_decision_needed: boolean
+  decision_areas: string[]
+  prompt_generated_at: string | null
+  screens: { design_document_id: string; page: number }[]
+  jira_key: string | null
+  jira_url: string | null
+}
+
+export interface DevStory {
+  id: string
+  epic_external_id: string
+  source_story_external_id: string | null
+  position: number
+  title: string
+  description: string
+  acceptance_criteria: string[]
+  story_points: number | null
+  labels: string[]
+  jira_key: string | null
+  jira_url: string | null
+  is_stale: boolean
+  tasks: DevTask[]
+}
+
+export interface DevEpic {
+  external_id: string
+  title: string
+  stories: { id: string; external_id: string; title: string }[]
+  dev_stories: DevStory[]
+}
+
+export interface DevOverview {
+  document: Document | null
+  tech_profile: TechProfile
+  unspecified_areas: string[]
+  epics: DevEpic[] // dependency order
+}

@@ -29,6 +29,14 @@ build brief (historical — some details changed during the build).
   locally with `java -jar tools/plantuml.jar` (never an outside service). Generated automatically at
   export time, cached in `use_case_diagrams` by story-content hash. Optional: without Java/the jar
   exports omit diagrams. Tests blank `PLANTUML_JAR` (conftest) and stub the renderer.
+- `backend/app/services/dev_stories.py` — the Dev stories page: per epic of the approved version,
+  development stories (future Jira Stories) and technical tasks (Sub-tasks) from
+  `ai/text/dev_story_generator.py` (OpenAI), and each task's coding prompt from
+  `ai/text/coding_prompt_generator.py` on **Claude via Amazon Bedrock** (`AnthropicBedrock`,
+  bedrock-runtime, `eu.` inference profile). Bedrock restricts Claude on ADLC-Prod, so the app assumes
+  `coding_prompt_role_arn`, a role in the company's TKMind account (Claude in EU regions only).
+  Claude returns plain Markdown; "decision needed" areas are read from its Technology section. The
+  per-project tech stack lives in `projects.tech_profile`. Nothing is sent to Jira yet.
 - `backend/app/services/style_reference.py` — reads a reference website's HTML/CSS (BeautifulSoup)
   into style tags. It fetches a user-supplied URL, so SSRF guards are mandatory (public IPs only,
   80/443 only, per-redirect checks, size/time caps) — keep them and their tests if you touch it.

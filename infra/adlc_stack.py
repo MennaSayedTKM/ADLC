@@ -130,6 +130,28 @@ BEDROCK_EMBED_STATEMENT = {
     ],
 }
 
+# Coding prompts: Claude through bedrock-runtime (config.yaml coding_prompt_model
+# / coding_prompt_region). The model ID is an EU inference profile, which may
+# serve a request from any EU region's copy of the model, so Claude in EU regions
+# only. Streamed, hence InvokeModelWithResponseStream. The model agreements are
+# accepted by a person in the console, so no Marketplace permissions here.
+BEDROCK_CODING_STATEMENTS = [
+    {
+        "Effect": "Allow",
+        "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+        "Resource": [
+            "arn:aws:bedrock:eu-*::foundation-model/anthropic.claude-*",
+            "arn:aws:bedrock:eu-*:*:inference-profile/eu.anthropic.claude-*",
+        ],
+    },
+]
+# While Bedrock keeps Claude restricted on this account, coding prompts run in
+# another company account: the app assumes this role there (the same ARN as
+# config.yaml's coding_prompt_role_arn). Unset: no cross-account access at all.
+coding_prompt_role_arn = cfg.get("codingPromptRoleArn")
+if coding_prompt_role_arn:
+    BEDROCK_CODING_STATEMENTS.append({"Effect": "Allow", "Action": "sts:AssumeRole", "Resource": coding_prompt_role_arn})
+
 # ── Network ──────────────────────────────────────────────────────────────────
 azs = aws.get_availability_zones(state="available").names[:2]  # the ALB needs two AZs
 
@@ -424,8 +446,8 @@ aws.iam.RolePolicy(
     ),
 )
 
-# Task role: what the app itself may do — Bedrock embeddings, its own EFS
-# data, and ECS Exec (a shell into the running container for debugging).
+# Task role: what the app itself may do — Bedrock embeddings and coding
+# prompts, its own EFS data, and ECS Exec (a shell into the running container for debugging).
 task_role = aws.iam.Role(f"{prefix}-task-role", assume_role_policy=_assume_role("ecs-tasks.amazonaws.com"), tags=tags)
 aws.iam.RolePolicy(
     f"{prefix}-task-policy",
@@ -436,6 +458,7 @@ aws.iam.RolePolicy(
                 "Version": "2012-10-17",
                 "Statement": [
                     BEDROCK_EMBED_STATEMENT,
+                    *BEDROCK_CODING_STATEMENTS,
                     {
                         "Effect": "Allow",
                         "Action": ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],

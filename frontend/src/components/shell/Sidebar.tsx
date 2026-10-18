@@ -185,7 +185,7 @@ export function Sidebar({ route, onNavigate, open }: { route: Route; onNavigate:
 
     share = [
       { key: 'publish', label: 'Publish & export', icon: 'send', href: projectHref(id, 'publish'), active: page === 'publish' },
-      { key: 'dev', label: 'Dev stories', icon: 'branch', href: projectHref(id, 'dev-stories'), active: page === 'dev-stories', soon: true },
+      { key: 'dev', label: 'Dev stories', icon: 'branch', href: projectHref(id, 'dev-stories'), active: page === 'dev-stories' },
     ]
   }
 

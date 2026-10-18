@@ -51,6 +51,16 @@ class Project(Base):
     # the same design system instead of inventing a new one.
     style_brief = Column(JSON, nullable=True)
 
+    # The project's technical stack for development coding prompts, per area
+    # ({"areas": {"frontend": "...", "backend": "...", ...}, "document_text":
+    # "...", "document_name": "..."}). Entered or uploaded by the company; an
+    # area left empty makes the coding prompts recommend options for it.
+    tech_profile = Column(JSON, nullable=True)
+
+    # Jira target for "Send to Jira": {"project_key", "issue_types": {...},
+    # "story_points_field"} — detected the first time the project connects.
+    jira_settings = Column(JSON, nullable=True)
+
 
 class Document(Base):
     """
@@ -257,7 +267,8 @@ class AiCall(Base):
             "call_type in ('extraction','alignment','rerank','crop','synthesis',"
             "'suggestions','item_draft','intake_transcription','clarifying_questions',"
             "'policy_coverage','source_material_review','output_story_review',"
-            "'artifact_quality_review','embedding','ux_prompt','use_case_diagram')",
+            "'artifact_quality_review','embedding','ux_prompt','use_case_diagram',"
+            "'dev_story','coding_prompt','screen_match','tech_profile')",
             name="ck_ai_calls_call_type",
         ),
     )
@@ -316,6 +327,84 @@ class UxPrompt(Base):
             "mode in ('foundation','new_feature','edit_existing')", name="ck_ux_prompts_mode"
         ),
     )
+
+
+class DevStory(Base):
+    """
+    A development story (a Jira Story, business level) derived from one
+    approved user story — one user story can have several. Lives under the
+    same epic. See services/dev_stories.py. Advisory until a person sends it to
+    Jira; jira_key is then set and later sends update the same issue.
+    """
+
+    __tablename__ = "dev_stories"
+
+    id = Column(String, primary_key=True, default=new_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False)  # approved version it came from
+    epic_item_id = Column(String, ForeignKey("requirement_items.id"), nullable=False)
+    source_story_item_id = Column(String, ForeignKey("requirement_items.id"), nullable=True)
+    # External ids (E3, S12) too: they stay the same across requirement versions.
+    epic_external_id = Column(String, nullable=False)
+    source_story_external_id = Column(String, nullable=True)
+    position = Column(Integer, nullable=False, default=0)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)  # markdown: objective, scope, notes
+    acceptance_criteria = Column(JSON, nullable=False, default=list)  # list[str]
+    story_points = Column(Integer, nullable=True)
+    labels = Column(JSON, nullable=False, default=list)  # list[str]
+    jira_key = Column(String, nullable=True)
+    jira_url = Column(String, nullable=True)
+    jira_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class DevTask(Base):
+    """
+    A technical task (a Jira Sub-task) of a development story, carrying the
+    coding prompt for it. coding_prompt is the model's output and is never
+    overwritten by edits; the person's edits go to edited_prompt. screens are
+    the approved UI screens attached to it: [{"design_document_id", "page"}].
+    """
+
+    __tablename__ = "dev_tasks"
+
+    id = Column(String, primary_key=True, default=new_uuid)
+    dev_story_id = Column(String, ForeignKey("dev_stories.id"), nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    title = Column(String, nullable=False)
+    summary = Column(Text, nullable=False)
+    area = Column(String, nullable=False)  # frontend / backend / data / integration / infrastructure / testing
+    coding_prompt = Column(Text, nullable=True)
+    edited_prompt = Column(Text, nullable=True)
+    # Some part of the stack wasn't specified: the prompt recommends an option
+    # and names alternatives, and the Jira sub-task is labelled for it.
+    tech_decision_needed = Column(Boolean, nullable=False, default=False)
+    decision_areas = Column(JSON, nullable=False, default=list)  # list[str]
+    prompt_generated_at = Column(DateTime, nullable=True)
+    screens = Column(JSON, nullable=False, default=list)
+    jira_key = Column(String, nullable=True)
+    jira_url = Column(String, nullable=True)
+    jira_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+
+class JiraEpic(Base):
+    """Which Jira Epic an epic of this project was sent to, by external id (E3),
+    so sending again (from any requirements version) updates instead of duplicating."""
+
+    __tablename__ = "jira_epics"
+
+    id = Column(String, primary_key=True, default=new_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
+    epic_external_id = Column(String, nullable=False)
+    jira_key = Column(String, nullable=False)
+    jira_url = Column(String, nullable=True)
+    synced_at = Column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (UniqueConstraint("project_id", "epic_external_id", name="uq_jira_epics_project_epic"),)
 
 
 class IntakeResource(Base):

@@ -1,4 +1,9 @@
 import type {
+  DevOverview,
+  DevStory,
+  DevTask,
+  TechDocumentRead,
+  TechProfile,
   AcDraft,
   ChangeRequestIngestResponse,
   ConfluencePublishResponse,
@@ -345,4 +350,38 @@ export const api = {
 
   deleteUxPrompt: (projectId: string, promptId: string) =>
     request<void>(`/projects/${projectId}/ux-prompts/${promptId}`, { method: 'DELETE' }),
+
+  // Development stories
+  getDevOverview: (projectId: string) => request<DevOverview>(`/projects/${projectId}/dev-stories`),
+  saveTechProfile: (projectId: string, areas: Record<string, string>) =>
+    request<TechProfile>(`/projects/${projectId}/dev-stories/tech-profile`, {
+      method: 'PUT',
+      body: JSON.stringify({ areas }),
+    }),
+  readTechDocument: (projectId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<TechDocumentRead>(`/projects/${projectId}/dev-stories/tech-profile/document`, {
+      method: 'POST',
+      body: form,
+    })
+  },
+  generateDevStories: (projectId: string, epicExternalId: string) =>
+    request<DevStory[]>(`/projects/${projectId}/dev-stories/epics/${epicExternalId}/generate`, { method: 'POST' }),
+  updateDevStory: (projectId: string, storyId: string, changes: Partial<Pick<DevStory, 'title' | 'description' | 'acceptance_criteria' | 'story_points' | 'labels'>>) =>
+    request<DevStory>(`/projects/${projectId}/dev-stories/stories/${storyId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+  deleteDevStory: (projectId: string, storyId: string) =>
+    request<void>(`/projects/${projectId}/dev-stories/stories/${storyId}`, { method: 'DELETE' }),
+  updateDevTask: (projectId: string, taskId: string, changes: Partial<Pick<DevTask, 'title' | 'summary' | 'area' | 'edited_prompt'>>) =>
+    request<DevTask>(`/projects/${projectId}/dev-stories/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+  deleteDevTask: (projectId: string, taskId: string) =>
+    request<void>(`/projects/${projectId}/dev-stories/tasks/${taskId}`, { method: 'DELETE' }),
+  writeCodingPrompt: (projectId: string, taskId: string) =>
+    request<DevTask>(`/projects/${projectId}/dev-stories/tasks/${taskId}/coding-prompt`, { method: 'POST' }),
 }

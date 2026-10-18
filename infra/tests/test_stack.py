@@ -37,6 +37,7 @@ mocks.install(
         "adlc:entraTenantId": "11111111-2222-3333-4444-555555555555",
         "adlc:entraClientId": "66666666-7777-8888-9999-000000000000",
         "adlc:entraClientSecret": "entra-secret-not-real",
+        "adlc:codingPromptRoleArn": "arn:aws:iam::222222222222:role/adlc-coding-prompts",
     },
     mocks.SECRET_KEYS + ["adlc:entraClientSecret"],
 )
@@ -170,11 +171,23 @@ def test_efs_is_encrypted_backed_up_and_owned_by_the_container_user():
     assert len(_by_type("aws:efs/mountTarget:MountTarget")) == 2
 
 
-def test_task_role_only_gets_cohere_embeddings_its_efs_and_ecs_exec():
+def test_task_role_only_gets_cohere_embeddings_claude_its_efs_and_ecs_exec():
     policy = json.loads(_one("aws:iam/rolePolicy:RolePolicy", "adlc-prod-task-policy")["policy"])
-    bedrock, efs, exec_ = policy["Statement"]
+    bedrock, claude, other_account, efs, exec_ = policy["Statement"]
     assert bedrock["Action"] == "bedrock:InvokeModel"
     assert all("cohere.embed-v4" in r for r in bedrock["Resource"])
+    assert claude["Action"] == ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+    # Claude only, EU regions only (the EU inference profile and the models it routes to)
+    assert claude["Resource"] == [
+        "arn:aws:bedrock:eu-*::foundation-model/anthropic.claude-*",
+        "arn:aws:bedrock:eu-*:*:inference-profile/eu.anthropic.claude-*",
+    ]
+    # only the one configured role in the other account, never sts:AssumeRole on *
+    assert other_account == {
+        "Effect": "Allow",
+        "Action": "sts:AssumeRole",
+        "Resource": "arn:aws:iam::222222222222:role/adlc-coding-prompts",
+    }
     assert efs["Resource"] == "arn:aws:mock:::adlc-prod-data-fs"
     assert "elasticfilesystem:AccessPointArn" in efs["Condition"]["StringEquals"]
     assert all(a.startswith("ssmmessages:") for a in exec_["Action"])
