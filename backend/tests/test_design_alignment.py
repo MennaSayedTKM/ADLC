@@ -155,6 +155,10 @@ def test_run_alignment_check_persists_reports_findings_and_ai_calls(
         assert reports[0].status == "partial"
         assert reports[1].page == 2
         assert reports[1].status == "aligned"
+        # the stories each screen shows are kept (for attaching screens to Jira sub-tasks),
+        # including one named only by a finding
+        assert reports[0].related_story_ids == ["S1"]
+        assert reports[1].related_story_ids == ["S1"]
 
         findings_page1 = (
             s.query(AlignmentFinding).filter(AlignmentFinding.alignment_report_id == reports[0].id).all()

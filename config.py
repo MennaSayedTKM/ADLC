@@ -105,6 +105,8 @@ CODING_PROMPT_MAX_TOKENS = int(_require("coding_prompt_max_tokens"))
 CODING_PROMPT_TECH_DOCUMENT_CHARS = int(_require("coding_prompt_tech_document_chars"))
 CODING_PROMPT_INPUT_COST_PER_MILLION = float(_require("coding_prompt_input_cost_per_million"))
 CODING_PROMPT_OUTPUT_COST_PER_MILLION = float(_require("coding_prompt_output_cost_per_million"))
+JIRA_REQUEST_TIMEOUT_SECONDS = float(_require("jira_request_timeout_seconds"))
+JIRA_DESCRIPTION_FALLBACK_CHARS = int(_require("jira_description_fallback_chars"))
 
 # GPT-4o cost estimation
 GPT4O_INPUT_COST_PER_MILLION = float(_require("gpt4o_input_cost_per_million"))

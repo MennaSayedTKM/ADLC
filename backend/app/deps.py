@@ -39,6 +39,27 @@ def get_confluence_client() -> ConfluenceClient:
     return ConfluenceClient(base_url=base_url, email=email, api_token=token, space_key=space_key)
 
 
+def get_jira_client():
+    """Jira on the same Atlassian site and account as Confluence: the site is
+    CONFLUENCE_BASE_URL without /wiki unless JIRA_BASE_URL says otherwise, and
+    JIRA_EMAIL / JIRA_API_TOKEN override the Confluence account if set."""
+    from config import JIRA_REQUEST_TIMEOUT_SECONDS
+
+    from .services.jira_client import JiraClient
+
+    confluence = os.environ.get("CONFLUENCE_BASE_URL", "").rstrip("/")
+    base_url = os.environ.get("JIRA_BASE_URL") or (confluence[: -len("/wiki")] if confluence.endswith("/wiki") else confluence)
+    email = os.environ.get("JIRA_EMAIL") or os.environ.get("CONFLUENCE_EMAIL", "")
+    token = os.environ.get("JIRA_API_TOKEN") or os.environ.get("CONFLUENCE_API_TOKEN", "")
+    if not all([base_url, email, token]):
+        raise HTTPException(
+            status_code=503,
+            detail="Jira is not configured — it uses the Confluence settings (CONFLUENCE_BASE_URL, "
+            "CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN) or JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN.",
+        )
+    return JiraClient(base_url=base_url, email=email, api_token=token, timeout_seconds=JIRA_REQUEST_TIMEOUT_SECONDS)
+
+
 def get_embed_client():
     """EmbedClient (self-hosted Qwen3-VL server) or BedrockEmbedClient
     (Cohere Embed v4) — same interface, chosen by config.yaml's embed_provider."""

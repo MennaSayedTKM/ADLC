@@ -181,11 +181,12 @@ export function Sidebar({ route, onNavigate, open }: { route: Route; onNavigate:
           lock
         ),
       },
+      // Planned from the approved stories, then sent to Jira from Publish & export, so it comes first.
+      { key: 'dev', label: 'Dev stories', icon: 'branch', href: projectHref(id, 'dev-stories'), active: page === 'dev-stories' },
     ]
 
     share = [
       { key: 'publish', label: 'Publish & export', icon: 'send', href: projectHref(id, 'publish'), active: page === 'publish' },
-      { key: 'dev', label: 'Dev stories', icon: 'branch', href: projectHref(id, 'dev-stories'), active: page === 'dev-stories' },
     ]
   }
 

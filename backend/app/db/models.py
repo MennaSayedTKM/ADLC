@@ -207,6 +207,10 @@ class AlignmentReport(Base):
     requirements_document_id = Column(String, ForeignKey("documents.id"), nullable=False)
     page = Column(Integer, nullable=False)
     status = Column(String, nullable=False)
+    # External ids of the approved stories this screen shows (["S1", "S4"]), as the
+    # check decided them; used to attach the screen to those stories' Jira sub-tasks.
+    # Null on reports from before it was kept (2026-10-18).
+    related_story_ids = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False, default=_utcnow)
 
     __table_args__ = (
@@ -364,8 +368,11 @@ class DevTask(Base):
     """
     A technical task (a Jira Sub-task) of a development story, carrying the
     coding prompt for it. coding_prompt is the model's output and is never
-    overwritten by edits; the person's edits go to edited_prompt. screens are
-    the approved UI screens attached to it: [{"design_document_id", "page"}].
+    overwritten by edits; the person's edits go to edited_prompt. screens lists
+    what has been attached to its Jira sub-task, so sending again doesn't attach
+    it twice: UI screens ({"kind": "screen", "design_document_id", "page",
+    "status", "filename", "jira_attachment_id"}) and, when the prompt was too
+    long for the description, the prompt file ({"kind": "prompt", "sha256", ...}).
     """
 
     __tablename__ = "dev_tasks"

@@ -311,3 +311,69 @@
   outline: 2px solid var(--color-focus);
   outline-offset: 1px;
 }
+
+.jira-project {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.jira-project__line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+
+.jira-project__line a,
+.dev-story__jira,
+.dev-task__jira {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.jira-project__meta {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.jira-project__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.jira-project__form label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.jira-project__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.jira-project__row input {
+  width: 10rem;
+  font: inherit;
+  font-family: var(--font-mono);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.jira-project__row input:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.dev-task__jira {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}

@@ -464,3 +464,45 @@ export interface DevOverview {
   unspecified_areas: string[]
   epics: DevEpic[] // dependency order
 }
+
+// ── Jira ─────────────────────────────────────────────────────────────────────
+
+export interface JiraSettings {
+  site_url: string | null
+  project_key: string
+  project_name: string | null
+  issue_types: Record<'epic' | 'story' | 'subtask', string>
+  story_points_field: string | null
+  checked_at: string | null
+}
+
+export interface JiraEpicPreview {
+  external_id: string
+  title: string
+  jira_key: string | null
+  jira_url: string | null
+  synced_at: string | null
+  stories: number
+  new_stories: number
+  stale_stories: number
+  tasks: number
+  new_tasks: number
+  tasks_without_prompt: number
+  decisions_needed: number
+  screens_to_attach: number
+}
+
+export interface JiraPreviewData {
+  settings: JiraSettings | null
+  design: { design_document_id: string | null; filename: string | null; screens: number; unlinked_screens: number }
+  epics: JiraEpicPreview[] // planned epics only, in dependency order
+  unplanned_epics: number
+}
+
+export interface JiraSendResult {
+  created: number
+  updated: number
+  attachments: number
+  error: string | null // Jira refused an issue; what was sent before it is kept
+  epic: JiraEpicPreview | null
+}

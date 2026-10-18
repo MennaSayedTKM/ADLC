@@ -36,7 +36,14 @@ build brief (historical — some details changed during the build).
   bedrock-runtime, `eu.` inference profile). Bedrock restricts Claude on ADLC-Prod, so the app assumes
   `coding_prompt_role_arn`, a role in the company's TKMind account (Claude in EU regions only).
   Claude returns plain Markdown; "decision needed" areas are read from its Technology section. The
-  per-project tech stack lives in `projects.tech_profile`. Nothing is sent to Jira yet.
+  per-project tech stack lives in `projects.tech_profile`.
+- `backend/app/services/jira_sync.py` — sends development stories to Jira (`jira_client.py`, REST v3, same
+  Atlassian site/account as Confluence): epic → Epic, development story → Story, technical task →
+  Sub-task whose description is its coding prompt (`jira_adf.py` converts our Markdown to Jira's format).
+  Frontend sub-tasks get their user story's screens from the latest design check, linked through
+  `alignment_reports.related_story_ids`. Keys are stored, so sending again updates; it never deletes
+  in Jira, and labels are only added/removed one by one. One epic per request; a refused issue stops
+  that epic but keeps what was already sent (never let an exception roll those keys back).
 - `backend/app/services/style_reference.py` — reads a reference website's HTML/CSS (BeautifulSoup)
   into style tags. It fetches a user-supplied URL, so SSRF guards are mandatory (public IPs only,
   80/443 only, per-redirect checks, size/time caps) — keep them and their tests if you touch it.
@@ -109,10 +116,13 @@ build brief (historical — some details changed during the build).
 
 ## Scope constraints (deliberate — flag anything that would break them)
 
-- No live connectors to Jira, GitHub, Slack or the Figma API; inputs are uploads. The one
-  outbound read is the PM-triggered, read-only fetch of a reference website's public HTML/CSS.
+- No live connectors to GitHub, Slack or the Figma API; inputs are uploads. Outbound reads are the
+  PM-triggered, read-only fetch of a reference website's public HTML/CSS and the read-only check of
+  a Jira project when a person connects it.
+- Jira is written to only when a person sends development stories (Publish & export, after a
+  preview and a confirmation): create/update issues and attach files, never delete.
 - No automatic writes to external systems. Every AI output is advisory, and anything
-  outbound (e.g. Confluence publish) needs an explicit user action.
+  outbound (Confluence publish, Jira send) needs an explicit user action.
 - Findings stay categorical (`aligned` / `partial` / `misaligned`) with textual recommendations, and
   are resolved or dismissed only by a person. The UI also shows a summary alignment percentage
   (aligned screens count fully, partial half — `lib/design.ts`); it is a display aid derived from those

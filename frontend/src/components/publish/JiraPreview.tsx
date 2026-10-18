@@ -1,32 +1,24 @@
-import { Badge } from '../ui/Badge'
-import { Button } from '../ui/Button'
 import { Icon } from '../ui/Icon'
 import { Panel } from '../ui/Panel'
 import './JiraPreview.css'
 
 const MAPPING: [string, string][] = [
   ['Epic', 'Jira Epic'],
-  ['User story', 'Jira Story'],
-  ['Acceptance criteria', 'Description checklist'],
-  ['Gap or open question', 'Task · label “needs-input”'],
-  ['Priority (Must / Should)', 'Jira priority'],
+  ['Development story', 'Story under its epic, with acceptance criteria and story points'],
+  ['Technical task', 'Sub-task whose description is its coding prompt'],
+  ['UI screens (Validate design)', 'Images on the frontend sub-tasks of their user story'],
+  ['Decision needed', 'Label “tech-decision-needed” on the sub-task'],
 ]
 
-/**
- * A static preview of how requirements would map to Jira. There is no Jira
- * connector and nothing here sends anything — it exists so the team can see
- * the direction and react to the mapping.
- */
+/** How development stories map to Jira issues when they're sent. */
 export function JiraPreview() {
   return (
     <Panel
       title={
         <span className="jira-preview__title">
-          <Icon name="branch" size={18} /> Preview: Jira stories
+          <Icon name="branch" size={18} /> How it maps to Jira
         </span>
       }
-      description="See how your requirements will map when Jira export arrives."
-      actions={<Badge tone="info">Beta preview</Badge>}
       className="jira-preview"
     >
       <ul className="jira-preview__list">
@@ -38,12 +30,9 @@ export function JiraPreview() {
           </li>
         ))}
       </ul>
-      <div>
-        <Button variant="secondary" size="sm" disabled title="Notifications are not available yet">
-          Notify me when it&rsquo;s ready
-        </Button>
-      </div>
-      <p className="jira-preview__note">Nothing is sent to Jira. Issues will only ever be created after you confirm.</p>
+      <p className="jira-preview__note">
+        Nothing is sent until you confirm. Sending again updates the same issues, and nothing is ever deleted in Jira.
+      </p>
     </Panel>
   )
 }

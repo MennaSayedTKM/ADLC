@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { api, ApiError } from '../api/client'
 import { JiraPreview } from '../components/publish/JiraPreview'
+import { JiraSendPanel } from '../components/publish/JiraSendPanel'
 import { Badge } from '../components/ui/Badge'
 import { Banner } from '../components/ui/Banner'
 import { Button } from '../components/ui/Button'
-import { ComingSoon } from '../components/ui/ComingSoon'
 import { Icon, type IconName } from '../components/ui/Icon'
 import { LockedState } from '../components/ui/LockedState'
 import { Modal } from '../components/ui/Modal'
@@ -14,10 +14,11 @@ import { relativeTime } from '../lib/format'
 import { confluenceInfo, isApproved } from '../lib/lifecycle'
 import { projectHref } from '../lib/router'
 import { useProject } from '../state/ProjectContext'
+import { useJiraPreview } from '../state/useJiraPreview'
 import { usePublishHistory } from '../state/usePublishHistory'
 import './PublishPage.css'
 
-type Destination = 'pdf' | 'confluence'
+type Destination = 'pdf' | 'confluence' | 'jira'
 type PdfFormat = 'business' | 'delivery'
 
 const PDF_FORMATS: { value: PdfFormat; title: string; body: string }[] = [
@@ -83,6 +84,7 @@ function DestinationCard({
 export function PublishPage() {
   const { project, requirements, reloadRequirements } = useProject()
   const history = usePublishHistory(project.id, requirements)
+  const jira = useJiraPreview(project.id)
   const [destination, setDestination] = useState<Destination>('pdf')
   const [format, setFormat] = useState<PdfFormat>('business')
   const [downloading, setDownloading] = useState(false)
@@ -183,11 +185,16 @@ export function PublishPage() {
         <DestinationCard
           icon="branch"
           title="Jira development stories"
-          body="Create epics and stories ready for your dev team."
-          badge={<ComingSoon label="Coming soon" />}
-          selected={false}
-          disabled
-          onSelect={() => undefined}
+          body="Epics, stories and sub-tasks with coding prompts and screens, from Dev stories."
+          badge={
+            jira.preview?.settings ? (
+              <Badge tone="success" icon="check">{jira.preview.settings.project_key}</Badge>
+            ) : (
+              <Badge tone="info">Set up</Badge>
+            )
+          }
+          selected={destination === 'jira'}
+          onSelect={() => setDestination('jira')}
         />
       </div>
 
@@ -222,6 +229,15 @@ export function PublishPage() {
                 )}
               </div>
             </Panel>
+          ) : destination === 'jira' ? (
+            <JiraSendPanel
+              projectId={project.id}
+              preview={jira.preview}
+              loading={jira.loading}
+              error={jira.error}
+              onChanged={jira.setPreview}
+              refresh={jira.refresh}
+            />
           ) : (
             <Panel title="Confluence" description="Each approved version becomes its own page under this project’s index page.">
               {published ? (

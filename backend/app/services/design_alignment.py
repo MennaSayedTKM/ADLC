@@ -122,6 +122,7 @@ def run_alignment_check(
             requirements_document_id=requirements_document.id,
             page=page_num,
             status=data["status"],
+            related_story_ids=list(data.get("related_requirement_ids") or []),
         )
         session.add(report)
         session.flush()

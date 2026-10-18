@@ -151,6 +151,13 @@ coding_prompt_tech_document_chars: 12000
 coding_prompt_input_cost_per_million: 4.40
 coding_prompt_output_cost_per_million: 22.00
 
+# ── Jira (sending development stories; same Atlassian site/account as Confluence) ──
+jira_request_timeout_seconds: 30
+# A coding prompt goes in full into its sub-task's description. Only when Jira
+# rejects that as too long, the description is cut to this many characters of
+# Jira's document format (its limit is 32,767) and the full prompt is attached.
+jira_description_fallback_chars: 30000
+
 # ── GPT-4o cost estimation (for ai_calls logging) ────────────────────────────
 # USD per 1,000,000 tokens. Update when OpenAI changes pricing.
 gpt4o_input_cost_per_million: 2.50

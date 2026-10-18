@@ -90,3 +90,57 @@ class DevTaskUpdate(BaseModel):
     summary: Optional[str] = None
     area: Optional[TaskArea] = None
     edited_prompt: Optional[str] = None  # null resets to the generated prompt
+
+
+# ── Jira ─────────────────────────────────────────────────────────────────────
+
+class JiraSettingsIn(BaseModel):
+    project_key: str = Field(min_length=1, max_length=20)
+
+
+class JiraSettingsOut(BaseModel):
+    site_url: Optional[str] = None
+    project_key: str
+    project_name: Optional[str] = None
+    issue_types: dict[str, str]  # epic / story / subtask -> the Jira issue type's name
+    story_points_field: Optional[str] = None
+    checked_at: Optional[str] = None
+
+
+class JiraDesignScreens(BaseModel):
+    design_document_id: Optional[str] = None
+    filename: Optional[str] = None
+    screens: int = 0
+    # aligned or partial screens the check didn't tie to a story (checks run before the link was kept)
+    unlinked_screens: int = 0
+
+
+class JiraEpicPreview(BaseModel):
+    external_id: str
+    title: str
+    jira_key: Optional[str] = None
+    jira_url: Optional[str] = None
+    synced_at: Optional[datetime] = None
+    stories: int
+    new_stories: int
+    stale_stories: int
+    tasks: int
+    new_tasks: int
+    tasks_without_prompt: int
+    decisions_needed: int
+    screens_to_attach: int
+
+
+class JiraPreviewOut(BaseModel):
+    settings: Optional[JiraSettingsOut] = None
+    design: JiraDesignScreens
+    epics: list[JiraEpicPreview]
+    unplanned_epics: int
+
+
+class JiraSendOut(BaseModel):
+    created: int
+    updated: int
+    attachments: int
+    error: Optional[str] = None  # Jira refused an issue; what was sent before it is kept
+    epic: Optional[JiraEpicPreview] = None

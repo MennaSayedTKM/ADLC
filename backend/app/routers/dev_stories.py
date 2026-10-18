@@ -1,10 +1,12 @@
 """
 Development stories: the project's tech profile, development stories planned
-from approved user stories, technical tasks and their coding prompts. See
-services/dev_stories.py. Nothing here writes to Jira.
+from approved user stories, technical tasks and their coding prompts (see
+services/dev_stories.py), and sending them to Jira (services/jira_sync.py).
+Jira is only written to by the send endpoint, which a person triggers.
 """
 
 import anthropic
+import requests
 from botocore.exceptions import BotoCoreError
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
@@ -13,18 +15,22 @@ from ai.text.coding_prompt_generator import CodingPromptError
 
 from ..db.models import Project
 from ..db.session import get_db
-from ..deps import get_coding_llm_client, get_openai_client
+from ..deps import get_coding_llm_client, get_jira_client, get_openai_client
 from ..schemas.dev_stories import (
     DevOverviewOut,
     DevStoryOut,
     DevStoryUpdate,
     DevTaskOut,
     DevTaskUpdate,
+    JiraPreviewOut,
+    JiraSendOut,
+    JiraSettingsIn,
     TechDocumentRead,
     TechProfileIn,
     TechProfileOut,
 )
 from ..services import dev_stories as svc
+from ..services import jira_sync
 
 router = APIRouter(prefix="/projects/{project_id}/dev-stories", tags=["dev-stories"])
 
@@ -147,3 +153,42 @@ def write_coding_prompt(
     except BotoCoreError as e:  # no usable AWS credentials (e.g. an expired local SSO login)
         raise HTTPException(status_code=502, detail=f"The coding model could not be reached: AWS credentials failed ({e}).")
     return svc.task_out(task)
+
+
+# ── Jira ─────────────────────────────────────────────────────────────────────
+
+@router.get("/jira", response_model=JiraPreviewOut)
+def get_jira_preview(project_id: str, db: Session = Depends(get_db)):
+    """What sending would create or update, per planned epic. Reads nothing from Jira."""
+    return jira_sync.preview(db, _get_project_or_404(db, project_id))
+
+
+@router.put("/jira/settings", response_model=JiraPreviewOut)
+def connect_jira_project(
+    project_id: str, body: JiraSettingsIn, db: Session = Depends(get_db), jira=Depends(get_jira_client)
+):
+    """Checks the Jira project (read-only) and remembers its issue types and fields."""
+    project = _get_project_or_404(db, project_id)
+    try:
+        jira_sync.connect(db, project, body.project_key, jira)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Jira could not be reached ({e.__class__.__name__}).")
+    return jira_sync.preview(db, project)
+
+
+@router.post("/jira/epics/{epic_external_id}/send", response_model=JiraSendOut)
+def send_epic_to_jira(
+    project_id: str, epic_external_id: str, db: Session = Depends(get_db), jira=Depends(get_jira_client)
+):
+    """Creates or updates one epic's Epic, Stories and Sub-tasks in Jira. One epic
+    per request, like planning: the page sends the chosen epics one by one. If
+    Jira refuses an issue, the answer says so and what was sent before it is kept."""
+    project = _get_project_or_404(db, project_id)
+    try:
+        return jira_sync.send_epic(db, project, epic_external_id, jira)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))

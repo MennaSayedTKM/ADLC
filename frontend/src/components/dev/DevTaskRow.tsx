@@ -4,6 +4,7 @@ import type { DevTask, TaskArea } from '../../api/types'
 import { Badge } from '../ui/Badge'
 import { Banner } from '../ui/Banner'
 import { Button } from '../ui/Button'
+import { Icon } from '../ui/Icon'
 import { TECH_AREA_LABEL } from '../../lib/techAreas'
 
 const TASK_AREA_LABEL: Record<TaskArea, string> = {
@@ -100,6 +101,11 @@ export function DevTaskRow({ projectId, task, writing, writeError, disabled, onW
             <Badge tone="success" icon="check">
               {edited ? 'Prompt edited' : 'Prompt ready'}
             </Badge>
+          )}
+          {task.jira_key && (
+            <a href={task.jira_url ?? undefined} target="_blank" rel="noreferrer" className="dev-task__jira">
+              {task.jira_key} <Icon name="external" size={13} />
+            </a>
           )}
           {task.tech_decision_needed && (
             <Badge tone="warning" icon="alert">

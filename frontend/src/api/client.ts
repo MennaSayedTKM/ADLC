@@ -1,5 +1,7 @@
 import type {
   DevOverview,
+  JiraPreviewData,
+  JiraSendResult,
   DevStory,
   DevTask,
   TechDocumentRead,
@@ -384,4 +386,14 @@ export const api = {
     request<void>(`/projects/${projectId}/dev-stories/tasks/${taskId}`, { method: 'DELETE' }),
   writeCodingPrompt: (projectId: string, taskId: string) =>
     request<DevTask>(`/projects/${projectId}/dev-stories/tasks/${taskId}/coding-prompt`, { method: 'POST' }),
+
+  // Jira (development stories). Only sendEpicToJira writes to Jira.
+  getJiraPreview: (projectId: string) => request<JiraPreviewData>(`/projects/${projectId}/dev-stories/jira`),
+  connectJiraProject: (projectId: string, projectKey: string) =>
+    request<JiraPreviewData>(`/projects/${projectId}/dev-stories/jira/settings`, {
+      method: 'PUT',
+      body: JSON.stringify({ project_key: projectKey }),
+    }),
+  sendEpicToJira: (projectId: string, epicExternalId: string) =>
+    request<JiraSendResult>(`/projects/${projectId}/dev-stories/jira/epics/${epicExternalId}/send`, { method: 'POST' }),
 }

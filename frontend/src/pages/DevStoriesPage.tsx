@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api } from '../api/client'
 import type { DevEpic, DevStory, DevTask } from '../api/types'
 import { DevTaskRow } from '../components/dev/DevTaskRow'
+import { JiraProjectPanel } from '../components/dev/JiraProjectPanel'
 import { TechStackPanel } from '../components/dev/TechStackPanel'
 import { Badge } from '../components/ui/Badge'
 import { Banner } from '../components/ui/Banner'
@@ -13,6 +14,7 @@ import { plural } from '../lib/format'
 import { isApproved } from '../lib/lifecycle'
 import { projectHref } from '../lib/router'
 import { useDevStories } from '../state/useDevStories'
+import { useJiraPreview } from '../state/useJiraPreview'
 import { useProject } from '../state/ProjectContext'
 import './DevStoriesPage.css'
 
@@ -43,6 +45,7 @@ export function DevStoriesPage() {
 function DevStories() {
   const { project } = useProject()
   const { overview, error, loading, refresh, replaceEpicStories, replaceStory, replaceTask } = useDevStories(project.id)
+  const jira = useJiraPreview(project.id)
   const [openEpic, setOpenEpic] = useState<string | null>(null)
   const [planning, setPlanning] = useState<{ current: string; done: number; total: number } | null>(null)
   const [writing, setWriting] = useState<{ taskId: string; done: number; total: number } | null>(null)
@@ -136,12 +139,19 @@ function DevStories() {
           <>
             Turn the approved user stories into work for the development team: each user story becomes one or more
             development stories (Jira Stories) under its epic, and each of those gets technical tasks (Sub-tasks) with a
-            detailed coding prompt. Nothing is sent to Jira from here yet.
+            detailed coding prompt. Send them to Jira from Publish &amp; export when they’re ready.
           </>
         }
       />
 
       <TechStackPanel key={overview.tech_profile.document_name ?? 'none'} projectId={project.id} profile={overview.tech_profile} onSaved={refresh} />
+
+      <JiraProjectPanel
+        key={`jira-${jira.preview?.settings?.project_key ?? 'none'}`}
+        projectId={project.id}
+        preview={jira.preview}
+        onConnected={jira.setPreview}
+      />
 
       {actionError && <Banner tone="danger">{actionError}</Banner>}
 
@@ -229,7 +239,14 @@ function DevStories() {
                           <p className="dev-story__meta">
                             {story.source_story_external_id && <>From {story.source_story_external_id}</>}
                             {story.story_points !== null && <> · {plural(story.story_points, 'point')}</>}
-                            {story.jira_key && <> · {story.jira_key}</>}
+                            {story.jira_key && (
+                              <>
+                                {' · '}
+                                <a href={story.jira_url ?? undefined} target="_blank" rel="noreferrer" className="dev-story__jira">
+                                  {story.jira_key} <Icon name="external" size={13} />
+                                </a>
+                              </>
+                            )}
                           </p>
                         </div>
                         <div className="dev-story__badges">

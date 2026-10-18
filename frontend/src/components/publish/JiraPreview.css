@@ -1,5 +1,4 @@
 .jira-preview {
-  border-style: dashed;
   background: var(--color-surface-sunken);
   box-shadow: none;
 }
@@ -27,12 +26,13 @@
   color: var(--color-text-secondary);
 }
 .jira-preview__row > span:first-child {
-  flex: 1;
+  flex: 0 0 38%;
+  font-weight: 600;
+  color: var(--color-text);
 }
 .jira-preview__to {
   flex: 1;
-  color: var(--color-accent-text);
-  font-weight: 600;
+  color: var(--color-text-secondary);
 }
 
 .jira-preview__note {
